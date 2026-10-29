@@ -52,18 +52,29 @@ work the way you would want that test to read.
 
 ## Language
 Write scenario names, bug reports (title, steps, expected, actual) and the final summary in the
-same language as the user story, e.g. Vietnamese for a Vietnamese story. Expected values in
-`expect` must match the page text exactly, in whatever language the application uses.
+same language as the user story. Expected values in `expect` must match the page text exactly,
+in whatever language the application uses.
 """
 
 
 # Letters only Vietnamese uses, so French or Spanish stories are not mistaken for it.
 _VIETNAMESE = re.compile(r"[ăđơưạảẩẫậắằẳẵặẹẻẽếềểễệỉịọỏốồổỗộớờởỡợụủứừửữựỳỵỷỹ]", re.IGNORECASE)
 
-VIETNAMESE_NOTICE = (
-    "The user story is in Vietnamese. Write scenario names, bug reports and the final summary in Vietnamese, "
-    "with full diacritics."
-)
+
+def story_language(story: str, focus: str | None = None) -> str | None:
+    """Name the story's language when it is safe to tell: Vietnamese, plain-ASCII English, or None."""
+    text = f"{story} {focus or ''}"
+    if _VIETNAMESE.search(text):
+        return "Vietnamese"
+    return "English" if text.isascii() else None
+
+
+def language_notice(language: str) -> str:
+    extra = ", with full diacritics" if language == "Vietnamese" else ""
+    return (
+        f"The user story is in {language}. Write scenario names, bug reports and the final summary "
+        f"in {language}{extra}."
+    )
 
 
 def initial_message(target_url: str, story: str, focus: str | None = None) -> str:
@@ -71,14 +82,17 @@ def initial_message(target_url: str, story: str, focus: str | None = None) -> st
     if focus:
         parts += ["", f"Focus: {focus.strip()}"]
     # Smaller models tend to ignore the system prompt's language rule, so restate it next to the story.
-    if _VIETNAMESE.search(f"{story} {focus or ''}"):
-        parts += ["", VIETNAMESE_NOTICE]
+    if language := story_language(story, focus):
+        parts += ["", language_notice(language)]
     parts += ["", "Plan your scenarios briefly, then start with begin_scenario."]
     return "\n".join(parts)
 
 
-STEP_LIMIT_NOTICE = (
-    "You have reached the step budget for this session. Do not call any more tools. "
-    "Reply with a 2-5 sentence summary, in the language of the user story: what works, what is broken, "
-    "and what you did not get to."
-)
+def step_limit_notice(story: str, focus: str | None = None) -> str:
+    # Name the language outright: this late in a long session, "the story's language" gets lost.
+    language = story_language(story, focus) or "the same language as the user story"
+    return (
+        "You have reached the step budget for this session. Do not call any more tools. "
+        f"Reply with a 2-5 sentence summary, written in {language}: what works, what is broken, "
+        "and what you did not get to."
+    )

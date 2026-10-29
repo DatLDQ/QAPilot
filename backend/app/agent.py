@@ -15,7 +15,7 @@ from typing import Any
 
 from .config import PRICING, Settings
 from .llm import LLMClient, LLMError, LLMEvent, LLMTurn
-from .prompts import STEP_LIMIT_NOTICE, SYSTEM_PROMPT, initial_message
+from .prompts import SYSTEM_PROMPT, initial_message, step_limit_notice
 from .tools import TOOL_DEFINITIONS, QAToolExecutor
 
 MAX_STREAM_RETRIES = 2
@@ -156,7 +156,7 @@ class QAAgent:
                 return  # tool_choice=none should prevent this; stop rather than loop
             if self.step >= self.settings.max_agent_steps:
                 force_finish = True
-                blocks = [*blocks, {"type": "text", "text": STEP_LIMIT_NOTICE}]
+                blocks = [*blocks, {"type": "text", "text": step_limit_notice(story, focus)}]
             messages.append({"role": "user", "content": blocks})
 
     def _result_event(self, block: dict[str, Any], summary: str, is_error: bool, ui: dict[str, Any]) -> dict[str, Any]:
