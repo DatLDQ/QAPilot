@@ -1,0 +1,22 @@
+[project]
+name = "qapilot-backend"
+version = "1.0.0"
+requires-python = ">=3.11"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+filterwarnings = ["ignore::DeprecationWarning"]
+# The generated suites carry their own pytest.ini; never collect them from data/.
+norecursedirs = ["data", ".venv", "node_modules"]
+markers = ["e2e: drives a real Chromium through the full pipeline (run with -m e2e)"]
+addopts = "-m 'not e2e'"
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+extend-exclude = ["data"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "BLE"]

@@ -1,0 +1,37 @@
+services:
+  backend:
+    build: ./backend
+    environment:
+      # Without a key the app runs in demo mode (offline scripted agent).
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      QAPILOT_PROVIDER: ${QAPILOT_PROVIDER:-}
+      QAPILOT_GEMINI_MODEL: ${QAPILOT_GEMINI_MODEL:-gemini-3.8-flash}
+      QAPILOT_OLLAMA_BASE_URL: ${QAPILOT_OLLAMA_BASE_URL:-http://host.docker.internal:11434/v1}
+      QAPILOT_OLLAMA_MODEL: ${QAPILOT_OLLAMA_MODEL:-qwen3:14b}
+      QAPILOT_DEMO_MODE: ${QAPILOT_DEMO_MODE:-}
+      QAPILOT_MODEL: ${QAPILOT_MODEL:-claude-opus-5-5}
+      QAPILOT_EFFORT: ${QAPILOT_EFFORT:-medium}
+      # The browser runs inside this container, so the demo shop is reached on its own port.
+      # The port is also published, so the same URL opens the shop from the host.
+      QAPILOT_PUBLIC_URL: http://localhost:8100
+    ports:
+      - "8100:8100"
+    # Chromium needs more shared memory than Docker's 64 MB default.
+    shm_size: 1gb
+    extra_hosts:
+      - "host.docker.internal:host-gateway"  # lets the container reach Ollama on the host (Linux)
+    volumes:
+      - qapilot-data:/data
+    restart: unless-stopped
+
+  frontend:
+    build: ./frontend
+    ports:
+      - "8080:80"
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+volumes:
+  qapilot-data:
