@@ -160,6 +160,7 @@ export interface TestOutcome {
   duration_s: number;
   message: string | null;
   verdict: Verdict;
+  failed_checks?: number[];
 }
 
 export interface SuiteRun {

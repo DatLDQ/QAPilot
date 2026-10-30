@@ -31,6 +31,8 @@ VERDICT_LABELS = {
 _PARAM_ID = re.compile(r"\[[^\]]*\]$")
 # One line per test in verbose mode: "test_qapilot.py::test_01_x[chromium] FAILED   [ 14%]"
 _PROGRESS = re.compile(r"::(test_\w+)(?:\[[^\]]*\])? (PASSED|FAILED|ERROR|SKIPPED)\b")
+# One line per failed soft check, "- #24 Cart badge shows 1 item: ...", possibly behind pytest's "E   " prefix.
+_FAILED_CHECK = re.compile(r"^(?:E\s+)?- #(\d+) ", re.MULTILINE)
 
 
 @dataclass
@@ -42,6 +44,7 @@ class TestOutcome:
     duration_s: float
     message: str | None
     verdict: str
+    failed_checks: list[int] = field(default_factory=list)  # step indices of the checks that failed
 
 
 @dataclass
@@ -60,21 +63,24 @@ class SuiteRun:
         return asdict(self)
 
 
-def _parse_junit(path: Path) -> dict[str, tuple[str, float, str | None]]:
-    results: dict[str, tuple[str, float, str | None]] = {}
+def _parse_junit(path: Path) -> dict[str, tuple[str, float, str | None, list[int]]]:
+    results: dict[str, tuple[str, float, str | None, list[int]]] = {}
     root = ET.parse(path).getroot()
     for case in root.iter("testcase"):
         name = _PARAM_ID.sub("", case.get("name", ""))  # pytest-playwright appends "[chromium]"
         duration = float(case.get("time") or 0)
-        outcome, message = "passed", None
+        outcome, message, failed_checks = "passed", None, []
         for tag, label in (("failure", "failed"), ("error", "error"), ("skipped", "skipped")):
             node = case.find(tag)
             if node is not None:
                 outcome = label
                 raw = node.get("message") or node.text or ""
                 message = "\n".join(line for line in raw.strip().splitlines()[:6])[:800] or None
+                # Read the untruncated text: a test with many failed checks overflows the message above.
+                full = f"{node.get('message') or ''}\n{node.text or ''}"
+                failed_checks = sorted({int(n) for n in _FAILED_CHECK.findall(full)})
                 break
-        results[name] = (outcome, duration, message)
+        results[name] = (outcome, duration, message, failed_checks)
     return results
 
 
@@ -155,11 +161,12 @@ async def run_suite(
         return run
     results = _parse_junit(report)
     for test in tests:
-        actual, duration, message = results.get(test.name, ("missing", 0.0, None))
+        actual, duration, message, failed_checks = results.get(test.name, ("missing", 0.0, None, []))
         expected = "pass" if control else test.expected_outcome
         run.tests.append(TestOutcome(
             scenario_id=test.scenario_id, name=test.name, expected=expected, actual=actual,
             duration_s=round(duration, 2), message=message, verdict=_verdict(expected, actual, control),
+            failed_checks=failed_checks,
         ))
     run.passed = sum(1 for t in run.tests if t.actual == "passed")
     run.failed = sum(1 for t in run.tests if t.actual != "passed")
@@ -167,11 +174,19 @@ async def run_suite(
 
 
 def apply_to_bugs(recorder: Recorder, target_run: SuiteRun) -> None:
-    """A bug counts as reproduced when the failing check that exposed it failed again."""
+    """A bug counts as reproduced when a failing check that exposed it failed again.
+
+    One test can hold several bugs, so the test failing is not enough: only the bugs whose own
+    checks are among its failed checks reproduced.
+    """
     by_scenario = {t.scenario_id: t for t in target_run.tests}
     for bug in recorder.bugs:
         outcome = by_scenario.get(bug.scenario_id) if bug.scenario_id is not None else None
         if outcome is None or not bug.check_steps or outcome.verdict == "error":
             bug.reproduced = None  # no assertion encodes this bug, so the replay cannot prove it
+        elif outcome.actual == "passed":
+            bug.reproduced = False
+        elif outcome.failed_checks:
+            bug.reproduced = not set(bug.check_steps).isdisjoint(outcome.failed_checks)
         else:
-            bug.reproduced = outcome.actual == "failed"
+            bug.reproduced = None  # an action broke before the checks were reported, so this proves nothing

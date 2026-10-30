@@ -1,5 +1,6 @@
 import ast
 import json
+from collections.abc import Callable
 
 import pytest
 
@@ -70,6 +71,17 @@ def test_write_suite(recorder, tmp_path):
     # The soft assertion states the correct behaviour, never the buggy value that was observed.
     assert 'expect(page.get_by_test_id("subtotal")).to_contain_text("$36.00")' in py
     assert "$18.00" not in py.split("def test_02")[1]
+    # Each check carries its step index, and a failure reports it, so verify can match it to its bug.
+    check_step = next(s.index for s in recorder.scenarios[1].steps if s.bug_ids)
+    assert f"soft.check({check_step}, " in py.split("def test_02")[1]
+    namespace: dict = {}
+    soft_class = next(n for n in tree.body if isinstance(n, ast.ClassDef) and n.name == "SoftAssertions")
+    exec(compile(ast.Module([soft_class], []), PY_FILE, "exec"), {"Callable": Callable}, namespace)
+    soft = namespace["SoftAssertions"]()
+    soft.check(7, "Subtotal is $36.00", lambda: None)
+    soft.check(9, "Badge shows 2", lambda: (_ for _ in ()).throw(AssertionError("expected 2\nmore")))
+    with pytest.raises(AssertionError, match=r"1 check\(s\) failed:\n- #9 Badge shows 2: expected 2$"):
+        soft.assert_all()
     assert 'page.get_by_test_id("card-mug").get_by_role("button", name="Add to cart", exact=True).click()' in py
     assert 'page.on("pageerror"' in py
 

@@ -143,12 +143,13 @@ class SoftAssertions:
     def __init__(self) -> None:
         self.failures: list[str] = []
 
-    def check(self, label: str, assertion: Callable[[], None]) -> None:
+    def check(self, step: int, label: str, assertion: Callable[[], None]) -> None:
         try:
             assertion()
         except AssertionError as exc:
             detail = next((line.strip() for line in str(exc).splitlines() if line.strip()), "failed")
-            self.failures.append(f"{{label}}: {{detail}}")
+            # "#<step>" lets QAPilot tell which recorded check, and so which bug, failed again.
+            self.failures.append(f"#{{step}} {{label}}: {{detail}}")
 
     def assert_all(self) -> None:
         if self.failures:
@@ -174,7 +175,7 @@ def _py_check(step: Step) -> str:
     label = py_str(step.description)
     expected = step.expected or ""
     if step.assertion == "no_console_errors":
-        return f"soft.check({label}, lambda: assert_no_errors(errors))"
+        return f"soft.check({step.index}, {label}, lambda: assert_no_errors(errors))"
     if step.assertion == "url_contains":
         body = f"expect(page).to_have_url(re.compile(re.escape({py_str(expected)})))"
     elif step.assertion == "title_contains":
@@ -187,7 +188,7 @@ def _py_check(step: Step) -> str:
             body = f"expect({loc}).to_have_count({int(expected)})"
         else:
             body = f"expect({loc}).{_PY_EXPECT_VALUE[step.assertion or '']}({py_str(expected)})"
-    return f"soft.check({label}, lambda: {body})"
+    return f"soft.check({step.index}, {label}, lambda: {body})"
 
 
 def _py_step(step: Step, base: str) -> str:

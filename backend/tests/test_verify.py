@@ -11,9 +11,10 @@ JUNIT = """<?xml version="1.0" encoding="utf-8"?>
 <testsuites><testsuite name="pytest" tests="4">
   <testcase classname="test_qapilot" name="test_01_ok[chromium]" time="1.20"/>
   <testcase classname="test_qapilot" name="test_02_broken[chromium]" time="2.5">
-    <failure message="AssertionError: 1 soft assertion(s) failed">Subtotal is $36.00
-Expected: $36.00
-Received: $18.00</failure>
+    <failure message="AssertionError: 2 check(s) failed:&#10;- #4 Subtotal is $36.00: Locator">page = &lt;Page&gt;
+E       AssertionError: 2 check(s) failed:
+E       - #4 Subtotal is $36.00: Locator expected to have text '$36.00'
+E       - #12 Badge shows 1: Locator expected to contain text '1'</failure>
   </testcase>
   <testcase classname="test_qapilot" name="test_03_setup" time="0"><error message="no fixture"/></testcase>
   <testcase classname="test_qapilot" name="test_04_skip" time="0"><skipped message="later"/></testcase>
@@ -25,9 +26,11 @@ def test_parse_junit_strips_the_browser_param(tmp_path):
     path = tmp_path / "results.xml"
     path.write_text(JUNIT, encoding="utf-8")
     results = _parse_junit(path)
-    assert results["test_01_ok"] == ("passed", 1.2, None)
+    assert results["test_01_ok"] == ("passed", 1.2, None, [])
     assert results["test_02_broken"][0] == "failed"
-    assert results["test_02_broken"][2] == "AssertionError: 1 soft assertion(s) failed"
+    assert results["test_02_broken"][2].startswith("AssertionError: 2 check(s) failed:")
+    # Failed checks come from the full text, which also lists the one cut from the message.
+    assert results["test_02_broken"][3] == [4, 12]
     assert results["test_03_setup"][0] == "error"
     assert results["test_04_skip"][0] == "skipped"
 
@@ -55,25 +58,38 @@ def test_progress_lines():
     assert _PROGRESS.search("collected 2 items") is None
 
 
-def _outcome(scenario_id: int, actual: str, verdict: str) -> verify.TestOutcome:
-    return verify.TestOutcome(scenario_id, f"test_{scenario_id:02d}", "fail", actual, 1.0, None, verdict)
+def _outcome(scenario_id: int, actual: str, verdict: str, failed_checks: list[int] | None = None) -> verify.TestOutcome:
+    return verify.TestOutcome(scenario_id, f"test_{scenario_id:02d}", "fail", actual, 1.0, None, verdict,
+                              failed_checks or [])
+
+
+def _bug(rec: Recorder, title: str) -> None:
+    rec.add_bug(title=title, severity="high", category="functional", steps_to_reproduce=["x"],
+                expected="y", actual="z", url="", screenshot=None)
 
 
 def test_apply_to_bugs():
     rec = Recorder("http://localhost/shop/")
-    for name in ("a", "b", "c"):
+    rec.begin("two bugs in one test", None, 0)
+    for name in ("badge", "detail page"):
+        rec.add_step(0, kind="expect", description=name, assertion="visible", passed=False)
+        _bug(rec, f"Bug in {name}")
+    for name in ("passes on replay", "cannot run", "action broke"):
         rec.begin(name, None, 0)
         rec.add_step(0, kind="expect", description=name, assertion="visible", passed=False)
-        rec.add_bug(title=f"Bug {name}", severity="high", category="functional", steps_to_reproduce=["x"],
-                    expected="y", actual="z", url="", screenshot=None)
+        _bug(rec, f"Bug {name}")
     rec.begin("prose only", None, 0)
-    rec.add_bug(title="No check behind it", severity="low", category="ui", steps_to_reproduce=["x"],
-                expected="y", actual="z", url="", screenshot=None)
+    _bug(rec, "No check behind it")
     run = SuiteRun("target", "http://localhost/shop/", True, 3.0, tests=[
-        _outcome(1, "failed", "reproduced"), _outcome(2, "passed", "not_reproduced"), _outcome(3, "error", "error"),
+        # Only the badge check failed again, so the detail-page bug did not reproduce.
+        _outcome(1, "failed", "reproduced", [1]),
+        _outcome(2, "passed", "not_reproduced"),
+        _outcome(3, "error", "error"),
+        _outcome(4, "failed", "reproduced"),
     ])
     apply_to_bugs(rec, run)
-    assert [b.reproduced for b in rec.bugs] == [True, False, None, None]
+    assert [b.check_steps for b in rec.bugs[:2]] == [[1], [2]]
+    assert [b.reproduced for b in rec.bugs] == [True, False, False, None, None, None]
 
 
 SUITE = '''
