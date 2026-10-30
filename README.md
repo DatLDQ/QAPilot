@@ -125,7 +125,7 @@ docker compose up --build
 ```
 
 Open <http://localhost:8080>, click **Use demo shop**, then **Start run**. The API and the demo shop are on
-<http://localhost:8100>.
+<http://localhost:8100>. If port 8080 is taken (for example by DataPilot), set `QAPILOT_WEB_PORT=8180` in `.env`.
 
 ### Demo mode (no API key, no cost)
 
@@ -362,7 +362,8 @@ cp .env.example .env   # điền ANTHROPIC_API_KEY, hoặc để trống để c
 docker compose up --build
 ```
 
-Sau đó mở <http://localhost:8080>, bấm **Use demo shop** rồi **Start run**.
+Sau đó mở <http://localhost:8080>, bấm **Use demo shop** rồi **Start run**. Nếu cổng 8080 đã bị chiếm (ví dụ bởi
+DataPilot), đặt `QAPILOT_WEB_PORT=8180` trong `.env`.
 
 **Chế độ demo (không cần API key, miễn phí):** nếu để trống `ANTHROPIC_API_KEY`, ứng dụng tự chạy ở chế độ demo.
 Một agent theo kịch bản thay cho Claude. Phần còn lại đều chạy thật: trình duyệt, ghi hình, sinh test và verify.
