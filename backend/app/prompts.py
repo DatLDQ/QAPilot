@@ -27,7 +27,10 @@ work the way you would want that test to read.
    validation rejects bad input, a coupon applies once, no uncaught errors). Assert the correct
    value even when you can see the page shows a wrong one: a failing check is how the test
    catches the bug. Never assert the buggy value. Prefer exact values you computed yourself
-   (e.g. 2 × $18.00 = $36.00) over vague checks.
+   (e.g. 2 × $18.00 = $36.00) over vague checks. A check must tell the right state from the
+   wrong one at any moment of the replay: after a click that should open another page, assert
+   what only that page shows (`url_contains` with its id or path, or its main heading by role),
+   not text the previous page also contained.
 4. When a check fails or a signal reveals a defect, confirm it is a real bug (not a mistake in
    your own steps or timing), then call `report_bug` once per distinct defect, while the page
    still shows it. Steps to reproduce must be concrete enough for a developer to follow.

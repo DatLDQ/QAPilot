@@ -103,7 +103,9 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
         "Target an element with ref, or describe one that should exist with role (+ optional name) or text. "
         "Page-level assertions (url_contains, title_contains, no_console_errors) need no target. "
         "A failure is recorded as a failing check in the generated test: state what SHOULD happen, never the buggy "
-        "value you observe. no_console_errors checks console errors and uncaught exceptions since the scenario began.",
+        "value you observe. The replay may run it before a navigation or update finishes, so assert something only the "
+        "expected state shows (url_contains, the destination's heading by role), never text the previous page also "
+        "had. no_console_errors checks console errors and uncaught exceptions since the scenario began.",
         {
             "assertion": {"type": "string", "enum": list(ASSERTIONS)},
             "ref": _REF,

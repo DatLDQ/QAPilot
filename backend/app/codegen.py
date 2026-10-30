@@ -128,6 +128,7 @@ from urllib.parse import urljoin
 
 import pytest
 from playwright.sync_api import Page, expect
+from playwright.sync_api import Error as PlaywrightError
 
 BASE_URL = os.environ.get("BASE_URL", {base_literal})
 expect.set_options(timeout=5_000)
@@ -158,6 +159,30 @@ class SoftAssertions:
 
 def assert_no_errors(errors: list[str]) -> None:
     assert not errors, "Console errors: " + " | ".join(errors[:3])
+
+
+# Resolves once the DOM has gone 300 ms without changes (or after 3 s at most).
+DOM_SETTLED = """() => new Promise((resolve) => {{
+    let timer;
+    const observer = new MutationObserver(() => {{ clearTimeout(timer); timer = setTimeout(done, 300); }});
+    const done = () => {{ observer.disconnect(); resolve(true); }};
+    timer = setTimeout(done, 300);
+    setTimeout(done, 3000);
+    observer.observe(document, {{ subtree: true, childList: true, characterData: true }});
+}})"""
+
+
+def navigates(page: Page, action: Callable[[], None]) -> None:
+    """Run a step that opened another page when it was recorded, and let that finish, so the
+    next check sees the new page rather than text left over from the old one."""
+    before = page.url
+    action()
+    try:
+        page.wait_for_url(lambda current: current != before, timeout=5_000)
+        # Client-side routers change the URL before they render the new page.
+        page.evaluate(DOM_SETTLED)
+    except PlaywrightError:
+        pass  # it did not navigate this time; the checks that follow report what is wrong
 
 
 @pytest.fixture(autouse=True)
@@ -218,6 +243,18 @@ def _uses_console(scenario: Scenario) -> bool:
     return any(s.assertion == "no_console_errors" for s in scenario.steps)
 
 
+def _navigating_steps(scenario: Scenario, start_url: str) -> set[int]:
+    """Actions that changed the URL during the session. Their replay waits for the change, or a
+    check right after could pass on the old page before the new one has loaded."""
+    navigating: set[int] = set()
+    current = start_url
+    for step in scenario.steps:
+        if step.kind not in ("goto", "expect") and step.url and step.url != current:
+            navigating.add(step.index)
+        current = step.url or current
+    return navigating
+
+
 def render_python(recorder: Recorder, run_id: str, story: str) -> str:
     base = app_base(recorder.target_url)
     out = [_PY_HEADER.format(
@@ -245,10 +282,12 @@ def render_python(recorder: Recorder, run_id: str, story: str) -> str:
             out.append('    page.on("pageerror", lambda exc: errors.append(f"Uncaught {exc.name}: {exc.message}"))')
         start = relative_url(scenario.start_url or recorder.target_url, base)
         out.append(f"    page.goto(url({py_str(start)}))")
+        navigating = _navigating_steps(scenario, scenario.start_url or recorder.target_url)
         for step in scenario.steps:
             note = f"  [{', '.join(step.bug_ids)}]" if step.bug_ids else ""
             out.append(f"    # {_one_line(step.description)}{note}".rstrip())
-            out.append(f"    {_py_step(step, base)}")
+            line = _py_step(step, base)
+            out.append(f"    navigates(page, lambda: {line})" if step.index in navigating else f"    {line}")
         out.append("    soft.assert_all()")
     return "\n".join(out) + "\n"
 
@@ -277,11 +316,35 @@ _TS_HEADER = """\
  *
  *   BASE_URL={base} npx playwright test
  */
-import {{ expect, test }} from '@playwright/test';
+import {{ expect, test, type Page }} from '@playwright/test';
 
 const BASE_URL = process.env.BASE_URL ?? {base_literal};
 const url = (path = '') => new URL(path, BASE_URL).toString();
 const escapeRe = (s: string) => s.replace(/[.*+?^${{}}()|[\\]\\\\]/g, '\\\\$&');
+
+// Resolves once the DOM has gone 300 ms without changes (or after 3 s at most).
+const domSettled = () => new Promise<void>((resolve) => {{
+  let timer: ReturnType<typeof setTimeout>;
+  const observer = new MutationObserver(() => {{ clearTimeout(timer); timer = setTimeout(done, 300); }});
+  const done = () => {{ observer.disconnect(); resolve(); }};
+  timer = setTimeout(done, 300);
+  setTimeout(done, 3000);
+  observer.observe(document, {{ subtree: true, childList: true, characterData: true }});
+}});
+
+// A step that opened another page when it was recorded: wait for the new page, so the next check
+// sees it rather than text left over from the old one.
+const navigates = async (page: Page, action: () => Promise<void>) => {{
+  const before = page.url();
+  await action();
+  try {{
+    await page.waitForURL((current) => current.toString() !== before, {{ timeout: 5_000 }});
+    // Client-side routers change the URL before they render the new page.
+    await page.evaluate(domSettled);
+  }} catch {{
+    // It did not navigate this time; the checks that follow report what is wrong.
+  }}
+}};
 
 test.beforeEach(async ({{ page }}) => {{
   page.on('dialog', (dialog) => dialog.accept());
@@ -352,10 +415,14 @@ def render_typescript(recorder: Recorder, run_id: str) -> str:
             out.append("  page.on('pageerror', (err) => consoleErrors.push(`Uncaught ${err.name}: ${err.message}`));")
         start = relative_url(scenario.start_url or recorder.target_url, base)
         out.append(f"  await page.goto(url({ts_str(start)}));")
+        navigating = _navigating_steps(scenario, scenario.start_url or recorder.target_url)
         for step in scenario.steps:
             note = f"  [{', '.join(step.bug_ids)}]" if step.bug_ids else ""
             out.append(f"  // {_one_line(step.description)}{note}".rstrip())
-            out.append(f"  {_ts_step(step, base)}")
+            line = _ts_step(step, base)
+            if step.index in navigating:
+                line = f"await navigates(page, () => {line.removeprefix('await ').removesuffix(';')});"
+            out.append(f"  {line}")
         out.append("});")
     return "\n".join(out) + "\n"
 

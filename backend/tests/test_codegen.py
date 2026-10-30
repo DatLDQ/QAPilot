@@ -5,6 +5,7 @@ from collections.abc import Callable
 import pytest
 
 from app.codegen import PY_FILE, TS_FILE, app_base, plan_tests, relative_url, slugify, write_suite
+from app.recorder import Recorder
 
 
 @pytest.mark.parametrize(
@@ -89,3 +90,21 @@ def test_write_suite(recorder, tmp_path):
     assert "test('02 · Cart subtotal multiplies price by quantity'" in ts
     assert "page.getByTestId('card-mug').getByRole('button', { name: 'Add to cart', exact: true })" in ts
     assert "process.env.BASE_URL" in ts or "baseURL" in (tests_dir / "playwright.config.ts").read_text()
+
+
+def test_steps_that_navigated_wait_for_the_new_page(tmp_path):
+    rec = Recorder("https://shop.example/")
+    rec.begin("Details link opens the product", "https://shop.example/inventory.html", 0)
+    button = [{"op": "role", "role": "button", "name": "View details", "exact": True}]
+    rec.add_step(0, kind="click", description="Add to cart", locator=button, url="https://shop.example/inventory.html")
+    rec.add_step(0, kind="click", description="Open details", locator=button, url="https://shop.example/item?id=4")
+    rec.add_step(0, kind="expect", description="Title is Bolt", assertion="text_equals", expected="Bolt",
+                 passed=True, locator=[{"op": "role", "role": "heading", "name": "Bolt"}])
+    write_suite(rec, tmp_path, "run1", "story")
+    py = (tmp_path / "tests" / PY_FILE).read_text(encoding="utf-8")
+    ast.parse(py)
+    click = 'page.get_by_role("button", name="View details", exact=True).click()'
+    # Only the click that changed the URL waits; the one that stayed on the page runs as is.
+    assert f"    navigates(page, lambda: {click})" in py and f"\n    {click}\n" in py
+    ts = (tmp_path / "tests" / TS_FILE).read_text(encoding="utf-8")
+    assert "await navigates(page, () => page.getByRole('button', { name: 'View details', exact: true }).click());" in ts
