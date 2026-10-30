@@ -124,6 +124,7 @@ export interface Bug {
   evidence: string | null;
   signals: string[];
   check_steps: number[];
+  untestable_reason?: string | null;
   reproduced: boolean | null;
   test?: string | null;
 }

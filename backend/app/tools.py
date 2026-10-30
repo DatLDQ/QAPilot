@@ -126,8 +126,10 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
     ),
     _tool(
         "report_bug",
-        "File one distinct defect you have confirmed, with exact reproduction steps. A screenshot of the current page "
-        "is attached automatically, and failing checks in the current scenario are linked to the bug.",
+        "File one distinct defect you have confirmed, with exact reproduction steps. It needs a failing `expect` in "
+        "the current scenario that captures the defect, so the generated regression test fails on it: assert the "
+        "correct behaviour first, then report. Those failing checks are linked to the bug, and a screenshot of the "
+        "current page is attached automatically.",
         {
             "title": {
                 "type": "string", "description": "Specific and searchable, e.g. 'Cart subtotal ignores quantity'."
@@ -138,6 +140,11 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
             "expected": {"type": "string"},
             "actual": {"type": "string"},
             "evidence": {"type": "string", "description": "Signals, requests or observations that support it."},
+            "untestable_reason": {
+                "type": "string",
+                "description": "Only when no expect assertion can capture the defect (e.g. a wrong product image "
+                "or broken layout): say why. The bug is then filed without a regression test.",
+            },
         },
         ["title", "severity", "category", "steps_to_reproduce", "expected", "actual"],
     ),
@@ -420,24 +427,35 @@ class QAToolExecutor:
         expected: str,
         actual: str,
         evidence: str | None = None,
+        untestable_reason: str | None = None,
     ) -> ToolOutcome:
         duplicate = next((b for b in self.recorder.bugs if b.title.lower() == title.lower()), None)
         if duplicate is not None:
             return ToolOutcome(content=f"{duplicate.id} already covers this ({duplicate.title}). Not filed again.",
                                summary=f"duplicate of {duplicate.id}")
+        current = self.recorder.current
+        if current is not None and current.unlinked_failed_checks:
+            untestable_reason = None  # a failing check backs the bug, so it gets a real regression test
+        elif not untestable_reason:
+            # Without a failing check the generated test passes on this build and can never catch the bug.
+            return ToolOutcome(
+                content="Not filed: no failing check in the current scenario captures this defect, so its regression "
+                "test would pass. Call expect to assert the correct behaviour (it should fail on this build), then "
+                "call report_bug again. If no assertion can capture it, call report_bug again with untestable_reason.",
+                is_error=True, summary="needs a failing check",
+            )
         try:
             rel, _ = await self.bridge.call(self.session.capture())
         except BrowserError:
             rel = None
-        current = self.recorder.current
         signals = [s.format() for s in self.session.errors_since(current.signal_start if current else 0)][:8]
         bug = self.recorder.add_bug(
             title=title, severity=severity, category=category, steps_to_reproduce=steps_to_reproduce,
             expected=expected, actual=actual, url=self.session.page.url if self.session.page else "",
-            screenshot=rel, evidence=evidence, signals=signals,
+            screenshot=rel, evidence=evidence, signals=signals, untestable_reason=untestable_reason,
         )
         checks = ", ".join(f"#{i}" for i in bug.check_steps)
-        linked = f" Linked to failing check(s) {checks}." if bug.check_steps else ""
+        linked = f" Linked to failing check(s) {checks}." if bug.check_steps else " Filed without a regression test."
         return ToolOutcome(
             content=f"Filed {bug.id} ({severity}): {title}.{linked}",
             summary=f"{bug.id} · {severity} · {title}",

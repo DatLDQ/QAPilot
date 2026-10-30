@@ -51,6 +51,11 @@ class Scenario:
         return [s for s in self.checks if s.passed is False]
 
     @property
+    def unlinked_failed_checks(self) -> list[Step]:
+        """Failing checks no bug has claimed yet: the evidence a new bug report can link to."""
+        return [s for s in self.failed_checks if not s.bug_ids]
+
+    @property
     def expected_outcome(self) -> Literal["pass", "fail"]:
         """How the generated test should behave against the build the agent explored."""
         return "fail" if self.failed_checks else "pass"
@@ -82,6 +87,8 @@ class Bug:
     evidence: str | None = None
     signals: list[str] = field(default_factory=list)
     check_steps: list[int] = field(default_factory=list)
+    # Why no assertion could capture this bug, when the agent filed it without a failing check.
+    untestable_reason: str | None = None
     # Filled in by verification: did the generated test fail the same way on a fresh browser?
     reproduced: bool | None = None
 
@@ -125,10 +132,9 @@ class Recorder:
         bug = Bug(id=f"BUG-{len(self.bugs) + 1}", scenario_id=scenario.id if scenario else None, **fields)
         if scenario is not None:
             # Tie the failing assertions that motivated this report to it, so the test names the bug.
-            for step in scenario.failed_checks:
-                if not step.bug_ids:
-                    step.bug_ids.append(bug.id)
-                    bug.check_steps.append(step.index)
+            for step in scenario.unlinked_failed_checks:
+                step.bug_ids.append(bug.id)
+                bug.check_steps.append(step.index)
         self.bugs.append(bug)
         return bug
 

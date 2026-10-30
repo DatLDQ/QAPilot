@@ -18,6 +18,7 @@ BUG = {
     "steps_to_reproduce": ["Open the cart", "Click Checkout"],
     "expected": "The checkout form opens",
     "actual": "Nothing happens",
+    "untestable_reason": "Scripted run without browser checks",
 }
 
 

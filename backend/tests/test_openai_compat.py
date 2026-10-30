@@ -15,7 +15,7 @@ from app.tools import TOOL_DEFINITIONS
 URL = "http://localhost:8100/shop/"
 BUG = {"title": "Checkout button does nothing", "severity": "high", "category": "functional",
        "steps_to_reproduce": ["Open the cart", "Click Checkout"], "expected": "The form opens",
-       "actual": "Nothing happens"}
+       "actual": "Nothing happens", "untestable_reason": "Scripted run without browser checks"}
 
 
 def sse(*chunks: dict) -> str:

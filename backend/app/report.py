@@ -39,6 +39,8 @@ def issue_markdown(bug: Bug, test_name: str | None = None) -> str:
         lines += ["", "```", *bug.signals, "```"]
     if test_name:
         lines += ["", f"Regression test: `{test_name}` ({_reproduced_label(bug)})."]
+    elif bug.untestable_reason:
+        lines += ["", f"No regression test: {bug.untestable_reason}"]
     return "\n".join(lines)
 
 

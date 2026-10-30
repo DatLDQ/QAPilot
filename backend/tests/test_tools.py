@@ -92,6 +92,35 @@ async def test_report_bug_links_failing_checks_and_dedupes(executor):
     assert "already covers this" in again.content and len(rec.bugs) == 1
 
 
+async def test_report_bug_needs_a_failing_check(executor):
+    rec = executor.recorder
+    rec.begin("Cart maths", None, 0)
+    rejected = await executor.execute("report_bug", BUG)
+    assert rejected.is_error and "Call expect" in rejected.content and rec.bugs == []
+
+    # A check already claimed by an earlier bug is not evidence for a new one.
+    rec.add_step(0, kind="expect", description="Subtotal is $36", passed=False)
+    await executor.execute("report_bug", BUG)
+    second = await executor.execute("report_bug", {**BUG, "title": "Tax is missing"})
+    assert second.is_error and len(rec.bugs) == 1
+
+
+async def test_report_bug_without_a_check_needs_a_reason(executor):
+    executor.recorder.begin("Product images", None, 0)
+    reason = "Every card shows the same image; no assertion compares image content."
+    filed = await executor.execute("report_bug", {**BUG, "untestable_reason": reason})
+    assert not filed.is_error and "Filed without a regression test" in filed.content
+    assert filed.ui["bug"]["untestable_reason"] == reason and filed.ui["bug"]["check_steps"] == []
+
+
+async def test_report_bug_drops_the_reason_when_a_check_backs_it(executor):
+    rec = executor.recorder
+    rec.begin("Cart maths", None, 0)
+    rec.add_step(0, kind="expect", description="Subtotal is $36", passed=False)
+    filed = await executor.execute("report_bug", {**BUG, "untestable_reason": "not needed"})
+    assert filed.ui["bug"]["check_steps"] == [1] and filed.ui["bug"]["untestable_reason"] is None
+
+
 async def test_finish_ends_the_session(executor):
     outcome = await executor.execute("finish", {"summary": "Checkout is broken.", "untested": "Payments"})
     assert outcome.finished and outcome.ui == {"kind": "finish", "summary": "Checkout is broken.",

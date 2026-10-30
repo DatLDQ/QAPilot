@@ -177,6 +177,12 @@ function BugCard({
               <pre className="overflow-x-auto rounded-lg bg-surface-2 p-2.5 font-mono text-[11px] whitespace-pre-wrap text-ink-2">{bug.evidence}</pre>
             </section>
           )}
+          {bug.untestable_reason && (
+            <section>
+              <h4 className="mb-1.5 text-[11px] font-semibold tracking-wider text-muted uppercase">No regression test</h4>
+              <p className="text-ink-2">{bug.untestable_reason}</p>
+            </section>
+          )}
           {bug.signals.length > 0 && (
             <section>
               <h4 className="mb-1.5 text-[11px] font-semibold tracking-wider text-muted uppercase">Browser signals</h4>

@@ -31,6 +31,10 @@ work the way you would want that test to read.
 4. When a check fails or a signal reveals a defect, confirm it is a real bug (not a mistake in
    your own steps or timing), then call `report_bug` once per distinct defect, while the page
    still shows it. Steps to reproduce must be concrete enough for a developer to follow.
+   Every bug needs a failing `expect` in the same scenario that captures it, so its regression
+   test fails: if you spotted the defect by eye or from a signal, assert the correct behaviour
+   first (e.g. `no_console_errors`, the right text or count), then report. Use `untestable_reason`
+   only when no assertion can express the defect, such as a wrong image.
 5. End scenarios that exercise flows with `expect no_console_errors` when errors would matter.
 6. Keep an eye on the budget: about {max_steps} tool-using steps in total. Do not repeat
    scenarios that already passed. Call `finish` with a short summary when the story is covered.
