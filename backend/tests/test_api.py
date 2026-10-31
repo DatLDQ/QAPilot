@@ -29,7 +29,9 @@ def parse_sse(body: str) -> list[dict]:
 def script() -> list:
     return [
         ([text("Checking the checkout."), tool_use("t1", "report_bug", **BUG)], "tool_use"),
-        ([tool_use("t2", "finish", summary="Checkout is broken.", untested="Payments")], "tool_use"),
+        ([tool_use("t2", "finish", summary="Checkout is broken.", untested="Payments",
+                   coverage=[{"area": "Pay for the order", "status": "not_tested", "note": "Needs a real card"}])],
+         "tool_use"),
     ]
 
 
@@ -113,6 +115,8 @@ def test_run_lifecycle(client, bridge):
     assert types[:3] == ["run_queued", "run_start", "phase"] and types[-1] == "done"
     assert [e["seq"] for e in events] == list(range(len(events)))
     assert [e["phase"] for e in events if e["type"] == "phase"] == ["explore", "report"]
+    # The recording starts once the browser is open, before the agent acts.
+    assert types.index("recording") == types.index("phase") + 1
     done = events[-1]
     assert done["status"] == "completed" and done["error"] is None
     assert done["summary"]["bugs_by_severity"]["high"] == 1 and done["summary"]["tests"] == 0
@@ -124,6 +128,8 @@ def test_run_lifecycle(client, bridge):
     assert run["status"] == "completed" and run["live"] is False
     result = run["result"]
     assert result["summary"] == "Checkout is broken." and result["untested"] == "Payments"
+    assert result["coverage"] == [
+        {"area": "Pay for the order", "status": "not_tested", "scenarios": [], "note": "Needs a real card"}]
     assert result["bugs"][0]["title"] == BUG["title"] and result["bugs"][0]["test"] is None
     assert result["artifacts"]["report"] == "report.md" and result["finished"] is True
     assert [r["id"] for r in client.get("/api/runs").json()] == [run_id]
@@ -135,6 +141,7 @@ def test_run_lifecycle(client, bridge):
     report = client.get(f"/api/runs/{run_id}/artifacts/report.md")
     assert report.status_code == 200 and report.headers["content-type"].startswith("text/markdown")
     assert BUG["title"] in report.text
+    assert "## Coverage" in report.text and "| Pay for the order | Not tested | - | Needs a real card |" in report.text
     download = client.get(f"/api/runs/{run_id}/artifacts/bugs.json", params={"download": True})
     assert "attachment" in download.headers["content-disposition"]
     for path in ("..%2Fqapilot.db", "../../qapilot.db", "missing.png"):

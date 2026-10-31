@@ -2,8 +2,9 @@ import clsx from "clsx";
 import { Check, ExternalLink, Square, Trash2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import type { Phase, RunRow } from "../api/types";
-import { formatCost, formatMs, parseTime, shortUrl } from "../lib/format";
+import { formatMs, parseTime, plural, shortUrl } from "../lib/format";
 import { isLive, PHASES, type RunView } from "../state/runReducer";
+import { ExportMenu } from "./ExportMenu";
 import { Button, StatusBadge } from "./ui";
 
 const PHASE_LABEL: Record<Phase, string> = {
@@ -43,7 +44,6 @@ export function RunHeader({
 }) {
   const live = isLive(view.status);
   const elapsed = useElapsed(row, view);
-  const cost = view.summary?.cost_usd ?? view.usage?.cost_usd ?? row.summary?.cost_usd;
   const maxSteps = view.maxSteps ?? row.max_steps;
 
   return (
@@ -78,32 +78,53 @@ export function RunHeader({
               Stop
             </Button>
           ) : (
-            <Button variant="ghost" onClick={onDelete} title="Delete this run">
-              <Trash2 className="size-4" />
-            </Button>
+            <>
+              <ExportMenu runId={row.id} view={view} />
+              <Button variant="ghost" onClick={onDelete} title="Delete this run">
+                <Trash2 className="size-4" />
+              </Button>
+            </>
           )}
         </div>
       </div>
 
-      <div className="mt-3 flex flex-wrap items-center gap-x-6 gap-y-2">
-        <PhaseStepper view={view} />
-        <dl className="ml-auto flex items-center gap-5 text-[12px]">
-          <Metric label="Steps" value={`${view.step}${maxSteps ? ` / ${maxSteps}` : ""}`} />
-          <Metric label="Elapsed" value={elapsed === null ? "–" : formatMs(elapsed)} />
-          <Metric label="Cost" value={formatCost(cost)} />
-          <Metric label="Model" value={view.model ?? row.model} mono />
-        </dl>
+      <div className="mt-3 flex flex-wrap items-center gap-x-6 gap-y-2 text-[12px]">
+        {live ? (
+          <>
+            <PhaseStepper view={view} />
+            <span className="ml-auto text-muted tabular">
+              Step {view.step}
+              {maxSteps ? ` / ${maxSteps}` : ""} · {elapsed === null ? "–" : formatMs(elapsed)}
+            </span>
+          </>
+        ) : (
+          <Outcome view={view} row={row} elapsed={elapsed} />
+        )}
       </div>
     </header>
   );
 }
 
-function Metric({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
+/** One line on how a finished run went, in place of the live progress. */
+function Outcome({ view, row, elapsed }: { view: RunView; row: RunRow; elapsed: number | null }) {
+  const summary = view.summary ?? row.summary;
+  const bugs = summary?.stats?.bugs ?? view.bugs.length;
+  const parts = [
+    bugs ? plural(bugs, "bug") : "No bugs",
+    summary?.reproduced ? `${summary.reproduced} reproduced` : null,
+    summary?.tests ? plural(summary.tests, "test") : null,
+    elapsed === null ? null : formatMs(elapsed),
+  ].filter(Boolean);
   return (
-    <div className="flex items-baseline gap-1.5">
-      <dt className="text-muted">{label}</dt>
-      <dd className={clsx("tabular text-ink-2", mono && "font-mono text-[11px]")}>{value}</dd>
-    </div>
+    <p className="text-ink-2 tabular">
+      <span className={clsx("font-medium", bugs ? "text-[#f06a6a]" : "text-[#3fcf3f]")}>{parts[0]}</span>
+      {parts.slice(1).map((p) => (
+        <span key={p} className="text-muted">
+          {" · "}
+          {p}
+        </span>
+      ))}
+    </p>
   );
 }
 

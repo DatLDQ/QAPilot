@@ -104,6 +104,7 @@ export interface Scenario {
   id: number;
   name: string;
   start_url: string | null;
+  aspect?: string | null;
   expected_outcome: "pass" | "fail";
   checks: number;
   failed_checks: number;
@@ -182,10 +183,19 @@ export interface Artifacts {
   bugs?: string;
 }
 
+/** How far the session got with one part of the user story, as the agent reported it in `finish`. */
+export interface CoverageItem {
+  area: string;
+  status: "tested" | "partly" | "not_tested";
+  scenarios: number[];
+  note: string | null;
+}
+
 export interface RunResult {
   target_url: string;
   summary: string | null;
   untested: string | null;
+  coverage?: CoverageItem[];
   scenarios: Scenario[];
   bugs: Bug[];
   stats: Stats;
@@ -216,7 +226,7 @@ export interface ToolUI {
   kind?: string;
   step?: Step | null;
   scenario_id?: number | null;
-  scenario?: { id: number; name: string; start_url: string };
+  scenario?: { id: number; name: string; start_url: string; aspect?: string | null };
   screenshot?: string | null;
   url?: string;
   title?: string;
@@ -225,6 +235,7 @@ export interface ToolUI {
   entries?: NetworkEntry[];
   summary?: string;
   untested?: string | null;
+  coverage?: CoverageItem[];
 }
 
 export interface NetworkEntry {
@@ -258,6 +269,7 @@ export type RunEvent = Base &
         started_at: string;
       }
     | { type: "phase"; phase: Phase }
+    | { type: "recording" }
     | { type: "agent_start"; model: string }
     | { type: "thinking_start" }
     | { type: "thinking_delta"; text: string }

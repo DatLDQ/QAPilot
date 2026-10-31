@@ -34,8 +34,10 @@ export type Block =
       input: Record<string, unknown> | null;
       summary?: string;
       ui?: ToolUI;
+      /** When the tool started running, in ms since the run began. */
+      t0?: number;
     }
-  | { kind: "scenario"; key: string; step: number; id: number; name: string; url: string }
+  | { kind: "scenario"; key: string; step: number; id: number; name: string; url: string; aspect?: string | null }
   | { kind: "phase"; key: string; step: number; phase: Phase }
   | { kind: "notice"; key: string; step: number; tone: "error" | "retry"; text: string };
 
@@ -45,6 +47,15 @@ export interface Frame {
   caption: string;
   url?: string;
   failed?: boolean;
+}
+
+/** One browser action, placed on the session video's clock (seconds since the recording began). */
+export interface Action {
+  start: number;
+  end: number;
+  step: number;
+  caption: string;
+  failed: boolean;
 }
 
 export interface VerifyState {
@@ -67,6 +78,9 @@ export interface RunView {
   step: number;
   blocks: Block[];
   frames: Frame[];
+  actions: Action[];
+  /** When the session video started, in ms since the run began. */
+  videoT0?: number;
   signals: Signal[];
   bugs: Bug[];
   stats: Stats | null;
@@ -94,6 +108,7 @@ export function initialRun(): RunView {
     step: 0,
     blocks: [],
     frames: [],
+    actions: [],
     signals: [],
     bugs: [],
     stats: null,
@@ -182,6 +197,8 @@ function reduce(state: RunView, ev: RunEvent): RunView {
       };
     case "phase":
       return enterPhase(state, ev.phase, ev.step);
+    case "recording":
+      return { ...state, videoT0: ev.t };
     case "agent_start":
       return { ...state, model: ev.model };
     case "thinking_start":
@@ -204,12 +221,13 @@ function reduce(state: RunView, ev: RunEvent): RunView {
           state.blocks,
           ev.id,
           { step: ev.step, id: ev.id, name: ev.name, status: "running", input: ev.input },
-          { status: "running", input: ev.input },
+          { status: "running", input: ev.input, t0: ev.t },
         ),
       };
     case "tool_result": {
       const ui = ev.ui ?? {};
       const status: ToolStatus = ui.kind === "skipped" ? "skipped" : ev.is_error ? "error" : "done";
+      const started = state.blocks.find((b): b is ToolBlock => b.kind === "tool" && b.id === ev.id)?.t0;
       let blocks = upsertTool(
         state.blocks,
         ev.id,
@@ -220,14 +238,33 @@ function reduce(state: RunView, ev: RunEvent): RunView {
         // The scenario header goes where the scenario begins, replacing its tool card.
         blocks = blocks.map((b) =>
           b.kind === "tool" && b.id === ev.id
-            ? { kind: "scenario", key: b.key, step: ev.step, id: ui.scenario!.id, name: ui.scenario!.name, url: ui.scenario!.start_url }
+            ? {
+                kind: "scenario",
+                key: b.key,
+                step: ev.step,
+                id: ui.scenario!.id,
+                name: ui.scenario!.name,
+                url: ui.scenario!.start_url,
+                aspect: ui.scenario!.aspect,
+              }
             : b,
         );
       }
       const frame = frameFor(ev.step, ev.name, ev.summary, ui);
+      const action =
+        state.videoT0 !== undefined && started !== undefined && state.phase === "explore"
+          ? {
+              start: (started - state.videoT0) / 1000,
+              end: (ev.t - state.videoT0) / 1000,
+              step: ev.step,
+              caption: ui.step?.description || ev.summary || ev.name,
+              failed: ui.kind === "check" ? ui.step?.passed === false : ui.kind === "bug",
+            }
+          : null;
       return {
         ...state,
         blocks,
+        actions: action ? [...state.actions, action] : state.actions,
         stats: ev.stats ?? state.stats,
         frames: frame && !state.frames.some((f) => f.path === frame.path) ? [...state.frames, frame] : state.frames,
         signals: mergeSignals(state.signals, ui.signals),

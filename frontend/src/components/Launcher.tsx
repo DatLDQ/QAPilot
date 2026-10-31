@@ -1,5 +1,5 @@
 import clsx from "clsx";
-import { ChevronDown, Compass, FileCode2, FileText, Play, ShieldCheck, ShoppingBag } from "lucide-react";
+import { ChevronDown, Play, ShoppingBag } from "lucide-react";
 import { useState, type FormEvent, type ReactNode } from "react";
 import type { AppConfig, NewRun } from "../api/types";
 import { Button, Spinner } from "./ui";
@@ -10,29 +10,6 @@ interface Props {
   error: string | null;
   onStart: (run: NewRun) => void;
 }
-
-const PHASES: { icon: ReactNode; title: string; body: string }[] = [
-  {
-    icon: <Compass className="size-4" />,
-    title: "Explore",
-    body: "Claude drives a real Chromium through your user story, in scenarios with fresh storage, asserting what it sees.",
-  },
-  {
-    icon: <FileCode2 className="size-4" />,
-    title: "Generate",
-    body: "Every scenario becomes a Playwright test, in Python and TypeScript, with resilient role-based locators.",
-  },
-  {
-    icon: <ShieldCheck className="size-4" />,
-    title: "Verify",
-    body: "The suite is replayed headless. A bug only counts as reproduced if its test fails on the target build.",
-  },
-  {
-    icon: <FileText className="size-4" />,
-    title: "Report",
-    body: "Bug reports with evidence, a session video, a Playwright trace and a downloadable test suite.",
-  },
-];
 
 export function Launcher({ config, starting, error, onStart }: Props) {
   const [targetUrl, setTargetUrl] = useState("");
@@ -192,18 +169,6 @@ export function Launcher({ config, starting, error, onStart }: Props) {
           </div>
         </form>
 
-        <ol className="mt-8 grid grid-cols-2 gap-3">
-          {PHASES.map((p, i) => (
-            <li key={p.title} className="rounded-xl border border-line bg-surface/60 p-4">
-              <div className="flex items-center gap-2 text-sm font-medium text-ink">
-                <span className="flex size-6 items-center justify-center rounded-md bg-surface-3 text-accent">{p.icon}</span>
-                <span className="text-muted tabular">{i + 1}</span>
-                {p.title}
-              </div>
-              <p className="mt-2 text-[13px] leading-relaxed text-muted">{p.body}</p>
-            </li>
-          ))}
-        </ol>
       </div>
     </div>
   );

@@ -199,6 +199,9 @@ class RunManager:
         except Exception as exc:  # noqa: BLE001 - Playwright raises plain Errors for launch failures
             raise RunError(f"Could not start the browser: {str(exc).splitlines()[0]}") from exc
         progress.session = session
+        if settings.record_video:
+            # The video starts now: its "t" lets the UI line actions up with the recording.
+            live.emit({"type": "recording", "step": 0})
         recorder = progress.recorder = Recorder(spec.target_url)
         agent = progress.agent = QAAgent(llm, QAToolExecutor(self.bridge, session, recorder), settings)
         async for event in agent.run(spec.target_url, spec.story, spec.focus):

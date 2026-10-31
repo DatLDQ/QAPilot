@@ -47,6 +47,9 @@ REF_RE = re.compile(r"^e\d+$")
 EXPECT_TIMEOUT_MS = 2500
 SETTLE_MAX_S = 3.0
 SETTLE_QUIET_S = 0.25
+# How long the video lingers on the cursor before an action, and on a check's verdict after it.
+POINT_PAUSE_S = 0.4
+VERDICT_PAUSE_S = 0.7
 
 
 def _load_js(name: str) -> str:
@@ -56,6 +59,9 @@ def _load_js(name: str) -> str:
 
 
 SNAPSHOT_JS = _load_js("snapshot.js")
+OVERLAY_JS = _load_js("overlay.js")
+ACTION_VERBS = {"click": "Click", "fill": "Type into", "select": "Choose in", "check": "Tick", "hover": "Hover",
+                "press": "Press a key on"}
 
 
 class BrowserError(RuntimeError):
@@ -242,6 +248,9 @@ class BrowserSession:
         self._shots = 0
         self._video_page: Page | None = None
         self._attached: list[Page] = []
+        # The video gets a visible cursor and captions; runs without a video skip the overlay and its pauses.
+        self._overlay = settings.record_video
+        self._cursor: tuple[float, float] | None = None
         self._closed = False
 
     @classmethod
@@ -258,6 +267,8 @@ class BrowserSession:
         session = cls(context, settings, run_dir, target_url)
         await context.tracing.start(screenshots=True, snapshots=True)
         await context.route("**/*", session._guard)
+        if session._overlay:
+            await context.add_init_script(script=OVERLAY_JS)
         context.on("page", session._on_page)
         page = await context.new_page()
         session._on_page(page)  # the "page" event may land later; _on_page ignores repeats
@@ -422,8 +433,39 @@ class BrowserSession:
         (self.run_dir / rel).write_bytes(data)
         return rel
 
+    # --- video overlay ----------------------------------------------------------------
+
+    async def _show(self, method: str, arg: dict[str, Any]) -> None:
+        if not self._overlay:
+            return
+        try:
+            await self._page.evaluate(f"(a) => window.__qaOverlay && window.__qaOverlay.{method}(a)", arg)
+        except PlaywrightError:
+            pass  # the page navigated mid-call; the overlay is cosmetic
+
+    async def _point_at(self, loc: Locator | None, label: str | None) -> dict[str, float] | None:
+        """Move the video cursor onto ``loc`` and caption the step. Returns the element's box."""
+        if not self._overlay:
+            return None
+        box = None
+        if loc is not None:
+            try:
+                if await loc.count():  # nothing to point at when checking that something is gone
+                    await loc.scroll_into_view_if_needed(timeout=1500)
+                    box = await loc.bounding_box(timeout=1500)
+            except PlaywrightError:
+                box = None
+        start = {"x": self._cursor[0], "y": self._cursor[1]} if self._cursor else None
+        await self._show("point", {"box": box, "label": label, "from": start})
+        if box:
+            self._cursor = (box["x"] + box["width"] / 2, box["y"] + box["height"] / 2)
+        await asyncio.sleep(POINT_PAUSE_S)
+        return box
+
     async def _after_action(self, *, spec: LocatorSpec | None = None, value: Any = None) -> ActionResult:
         await self._settle()
+        if self._cursor:  # a new document starts without the cursor
+            await self._show("place", {"x": self._cursor[0], "y": self._cursor[1]})
         snap = await self.snapshot()
         shot = await self._step_screenshot()
         return ActionResult(snapshot=snap, signals=self.drain_signals(), screenshot=shot, spec=spec, value=value)
@@ -448,17 +490,18 @@ class BrowserSession:
             allowed = ", ".join(sorted(self.allowed_hosts))
             raise BrowserError(f"Navigation to {url} is not allowed. Allowed hosts: {allowed}.")
 
-    async def goto(self, url: str) -> ActionResult:
+    async def goto(self, url: str, label: str | None = None) -> ActionResult:
         self._check_url(url)
         try:
             response = await self._page.goto(url, wait_until="domcontentloaded")
         except PlaywrightError as exc:
             raise BrowserError(_brief(exc), await self._safe_snapshot()) from None
+        await self._show("point", {"label": label or f"Open {urlparse(url).path or '/'}"})
         result = await self._after_action()
         result.status = response.status if response else None
         return result
 
-    async def reset(self, start_url: str) -> ActionResult:
+    async def reset(self, start_url: str, label: str | None = None) -> ActionResult:
         """Fresh cookies and storage, then open ``start_url``: every scenario replays on its own."""
         self._check_url(start_url)
         try:
@@ -471,13 +514,16 @@ class BrowserSession:
         except PlaywrightError:
             pass
         await self.context.clear_cookies()
-        return await self.goto(start_url)
+        return await self.goto(start_url, label)
 
-    async def act(self, kind: str, ref: str, value: Any = None) -> ActionResult:
+    async def act(self, kind: str, ref: str, value: Any = None, label: str | None = None) -> ActionResult:
         info = await self._resolve(ref)
         try:
             spec = await build_spec(self._page, ref, info)
             loc = to_runtime(self._page, spec)
+            await self._point_at(loc, label or f"{ACTION_VERBS.get(kind, kind)} {info.get('name') or ref}")
+            if kind in ("click", "fill", "select", "check"):
+                await self._show("click", {})
             match kind:
                 case "click":
                     await loc.click()
@@ -497,7 +543,8 @@ class BrowserSession:
             raise BrowserError(_brief(exc), await self._safe_snapshot()) from None
         return await self._after_action(spec=spec, value=value)
 
-    async def press_page(self, key: str) -> ActionResult:
+    async def press_page(self, key: str, label: str | None = None) -> ActionResult:
+        await self._show("point", {"label": label or f"Press {key}"})
         try:
             await self._page.keyboard.press(key)
         except PlaywrightError as exc:
@@ -533,15 +580,19 @@ class BrowserSession:
         target: LocatorSpec | None = None,
         expected: str | None = None,
         since_seq: int = 0,
+        label: str | None = None,
     ) -> CheckResult:
         page = self._page
         spec: LocatorSpec | None = None
+        box: dict[str, float] | None = None
+        caption = f"Check: {label or assertion.replace('_', ' ')}"
         await self._settle()
         if assertion == "no_console_errors":
             errors = self.errors_since(since_seq)
             passed = not errors
             actual = "no errors" if passed else " | ".join(s.text for s in errors[:5])
         elif assertion in ("url_contains", "title_contains"):
+            await self._show("point", {"label": caption})
             pattern = re.compile(re.escape(expected or ""))
             try:
                 if assertion == "url_contains":
@@ -560,6 +611,10 @@ class BrowserSession:
             else:
                 raise BrowserError("This assertion needs a ref, or a role/name or text describing the element.")
             loc = to_runtime(page, spec)
+            if assertion == "count_equals":
+                await self._show("point", {"label": caption})
+            else:
+                box = await self._point_at(loc, caption)
             try:
                 await _expect(loc, assertion, expected)
                 passed = True
@@ -568,6 +623,14 @@ class BrowserSession:
             except PlaywrightError as exc:
                 raise BrowserError(_brief(exc)) from None
             actual = await _actual(loc, assertion)
+        if self._overlay:
+            if passed:
+                verdict = f"\u2713 {label or assertion}"
+            else:
+                want = f"expected {_clip(expected, 60)!r}" if expected else (label or assertion)
+                verdict = f"\u2717 Failed: {want} \u00b7 actual {_clip(actual, 80)!r}"
+            await self._show("verdict", {"box": box, "passed": passed, "text": verdict})
+            await asyncio.sleep(VERDICT_PAUSE_S)
         shot = await self._step_screenshot()
         return CheckResult(passed, actual, spec, self.drain_signals(), shot, page.url)
 

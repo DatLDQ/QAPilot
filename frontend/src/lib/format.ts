@@ -11,16 +11,6 @@ export function formatSeconds(s: number): string {
   return formatMs(s * 1000);
 }
 
-export function formatTokens(n: number): string {
-  return n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n);
-}
-
-export function formatCost(usd: number | null | undefined): string {
-  if (usd === null || usd === undefined) return "n/a";
-  if (usd === 0) return "$0";
-  return usd < 0.01 ? `$${usd.toFixed(4)}` : `$${usd.toFixed(3)}`;
-}
-
 const UNITS: [Intl.RelativeTimeFormatUnit, number][] = [
   ["year", 365 * 86400],
   ["month", 30 * 86400],

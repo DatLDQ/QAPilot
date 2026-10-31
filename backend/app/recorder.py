@@ -10,6 +10,12 @@ SEVERITIES: tuple[str, ...] = ("critical", "high", "medium", "low")
 CATEGORIES: tuple[str, ...] = (
     "functional", "validation", "ui", "accessibility", "console", "network", "performance", "security", "content",
 )
+# What kind of behaviour a scenario covers; the run view groups its overview by this.
+ASPECTS: tuple[str, ...] = (
+    "happy_path", "edge_case", "validation", "state", "error_handling", "accessibility",
+)
+# How far the session got with one part of the user story, as the agent reports it when it finishes.
+COVERAGE_STATUSES: tuple[str, ...] = ("tested", "partly", "not_tested")
 
 
 @dataclass
@@ -40,6 +46,7 @@ class Scenario:
     name: str
     start_url: str | None
     signal_start: int = 0
+    aspect: str | None = None
     steps: list[Step] = field(default_factory=list)
 
     @property
@@ -65,6 +72,7 @@ class Scenario:
             "id": self.id,
             "name": self.name,
             "start_url": self.start_url,
+            "aspect": self.aspect,
             "expected_outcome": self.expected_outcome,
             "checks": len(self.checks),
             "failed_checks": len(self.failed_checks),
@@ -103,15 +111,17 @@ class Recorder:
         self.bugs: list[Bug] = []
         self.summary: str | None = None
         self.untested: str | None = None
+        # One row per part of the story: {area, status, scenarios, note}.
+        self.coverage: list[dict[str, Any]] = []
         self._step_index = 0
 
     @property
     def current(self) -> Scenario | None:
         return self.scenarios[-1] if self.scenarios else None
 
-    def begin(self, name: str, start_url: str | None, signal_start: int) -> Scenario:
+    def begin(self, name: str, start_url: str | None, signal_start: int, aspect: str | None = None) -> Scenario:
         scenario = Scenario(
-            id=len(self.scenarios) + 1, name=name.strip(), start_url=start_url, signal_start=signal_start
+            id=len(self.scenarios) + 1, name=name.strip(), start_url=start_url, signal_start=signal_start, aspect=aspect
         )
         self.scenarios.append(scenario)
         return scenario
@@ -153,6 +163,7 @@ class Recorder:
             "target_url": self.target_url,
             "summary": self.summary,
             "untested": self.untested,
+            "coverage": self.coverage,
             "scenarios": [s.to_dict() for s in self.scenarios],
             "bugs": [b.to_dict() for b in self.bugs],
             "stats": self.stats(),

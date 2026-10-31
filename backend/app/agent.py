@@ -20,6 +20,7 @@ from .tools import TOOL_DEFINITIONS, QAToolExecutor
 
 MAX_STREAM_RETRIES = 2
 SKIPPED = "Skipped: an earlier tool call in this turn failed, so the page may not be in the state you assumed."
+OVER_BUDGET = "Not run: the step budget is used up, so only `finish` can run now."
 
 _USAGE_KEYS = ("input_tokens", "output_tokens", "cache_read_input_tokens", "cache_creation_input_tokens")
 
@@ -102,7 +103,8 @@ class QAAgent:
         while True:
             self.step += 1
             turn: LLMTurn | None = None
-            async for item in self._call(self.step, system, messages, force_finish):
+            # At the budget the tools stay listed (so the prompt cache still hits), but only `finish` runs.
+            async for item in self._call(self.step, system, messages):
                 if isinstance(item, LLMTurn):
                     turn = item
                 else:
@@ -137,6 +139,11 @@ class QAAgent:
             blocks: list[dict[str, Any]] = []
             failed = False
             for b in tool_uses:
+                if force_finish and b["name"] != "finish":
+                    blocks.append({"type": "tool_result", "tool_use_id": b["id"], "content": OVER_BUDGET,
+                                   "is_error": True})
+                    yield self._result_event(b, OVER_BUDGET, True, {"kind": "skipped"})
+                    continue
                 if failed:
                     blocks.append({"type": "tool_result", "tool_use_id": b["id"], "content": SKIPPED,
                                    "is_error": True})
@@ -153,7 +160,7 @@ class QAAgent:
                     self.finished = True
                     return
             if force_finish:
-                return  # tool_choice=none should prevent this; stop rather than loop
+                return  # the agent had its one wrap-up turn and did not finish; stop rather than loop
             if self.step >= self.settings.max_agent_steps:
                 force_finish = True
                 blocks = [*blocks, {"type": "text", "text": step_limit_notice(story, focus)}]
@@ -172,7 +179,7 @@ class QAAgent:
         }
 
     async def _call(
-        self, step: int, system: str, messages: list[dict], force_finish: bool
+        self, step: int, system: str, messages: list[dict]
     ) -> AsyncIterator[dict[str, Any] | LLMTurn]:
         """One model call with retries for streams that break mid-way."""
         for attempt in range(MAX_STREAM_RETRIES + 1):
@@ -181,7 +188,6 @@ class QAAgent:
                     system=system,
                     tools=TOOL_DEFINITIONS,
                     messages=messages,
-                    tool_choice={"type": "none"} if force_finish else None,
                 ):
                     if isinstance(item, LLMTurn):
                         for key in _USAGE_KEYS:

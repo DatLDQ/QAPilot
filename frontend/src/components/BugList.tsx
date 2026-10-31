@@ -1,5 +1,5 @@
 import clsx from "clsx";
-import { Bug as BugIcon, CircleCheck, CircleHelp, CircleX, ExternalLink, FlaskConical, X } from "lucide-react";
+import { Bug as BugIcon, ChevronDown, CircleCheck, CircleHelp, CircleX, ExternalLink, FlaskConical, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import { artifactUrl } from "../api/client";
 import type { Bug, Severity } from "../api/types";
@@ -28,28 +28,20 @@ export function Reproduced({ value, pending }: { value: boolean | null; pending?
   );
 }
 
-/** One-line bug card for the live timeline. */
+/** Compact bug card for the session timeline. */
 export function BugSummary({ bug, runId, onOpen }: { bug: Bug; runId: string; onOpen: () => void }) {
   return (
     <button type="button" onClick={onOpen} className="flex w-full items-start gap-3 text-left">
-      <span className="mt-0.5 flex size-6 shrink-0 items-center justify-center rounded-md bg-critical/20 text-[#f06a6a]">
-        <BugIcon className="size-3.5" />
-      </span>
+      <BugIcon className="mt-0.5 size-4 shrink-0 text-[#f06a6a]" />
       <span className="min-w-0 flex-1">
         <span className="flex flex-wrap items-center gap-1.5">
-          <span className="font-mono text-[11px] text-muted">{bug.id}</span>
           <SeverityBadge severity={bug.severity} />
-          <Badge>{bug.category}</Badge>
-          {bug.reproduced !== null && <Reproduced value={bug.reproduced} />}
+          <span className="text-sm font-medium text-ink">{bug.title}</span>
         </span>
-        <span className="mt-1 block text-sm font-medium text-ink">{bug.title}</span>
-        <span className="mt-0.5 block text-[12px] text-muted">
-          <span className="text-ink-2">Expected</span> {bug.expected} <span className="text-ink-2">· Actual</span>{" "}
-          <span className="text-[#f06a6a]">{bug.actual}</span>
-        </span>
+        <span className="mt-0.5 line-clamp-2 block text-[12px] text-[#f06a6a]">{bug.actual}</span>
       </span>
       {bug.screenshot && (
-        <img src={artifactUrl(runId, bug.screenshot)} alt="" loading="lazy" className="h-12 w-20 shrink-0 rounded border border-line object-cover object-top" />
+        <img src={artifactUrl(runId, bug.screenshot)} alt="" loading="lazy" className="h-10 w-16 shrink-0 rounded border border-line object-cover object-top" />
       )}
     </button>
   );
@@ -70,7 +62,6 @@ export function BugList({
   live: boolean;
   onOpenTest: (name: string) => void;
 }) {
-  const [severity, setSeverity] = useState<Severity | "all">("all");
   const [zoom, setZoom] = useState<string | null>(null);
 
   if (!bugs.length) {
@@ -81,49 +72,14 @@ export function BugList({
     );
   }
 
-  const counts = Object.fromEntries(ORDER.map((s) => [s, bugs.filter((b) => b.severity === s).length])) as Record<Severity, number>;
-  const shown = bugs
-    .filter((b) => severity === "all" || b.severity === severity)
-    .sort((a, b) => ORDER.indexOf(a.severity) - ORDER.indexOf(b.severity));
-
+  const shown = [...bugs].sort((a, b) => ORDER.indexOf(a.severity) - ORDER.indexOf(b.severity));
   return (
-    <div className="mx-auto max-w-4xl space-y-4 px-6 py-5">
-      <div className="flex flex-wrap items-center gap-1.5">
-        <FilterChip active={severity === "all"} onClick={() => setSeverity("all")}>
-          All {bugs.length}
-        </FilterChip>
-        {ORDER.filter((s) => counts[s]).map((s) => (
-          <FilterChip key={s} active={severity === s} onClick={() => setSeverity(s)}>
-            <span className="capitalize">{s}</span> {counts[s]}
-          </FilterChip>
-        ))}
-        <span className="ml-auto text-[12px] text-muted">
-          {bugs.filter((b) => b.reproduced).length} of {bugs.length} reproduced by a failing test
-        </span>
-      </div>
-
+    <div className="mx-auto max-w-3xl space-y-3 px-6 py-5">
       {shown.map((bug) => (
         <BugCard key={bug.id} bug={bug} runId={runId} baseUrl={baseUrl} verifying={verifying} onZoom={setZoom} onOpenTest={onOpenTest} />
       ))}
-
       {zoom && <Lightbox src={artifactUrl(runId, zoom)} onClose={() => setZoom(null)} />}
     </div>
-  );
-}
-
-function FilterChip({ active, onClick, children }: { active: boolean; onClick: () => void; children: React.ReactNode }) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      aria-pressed={active}
-      className={clsx(
-        "rounded-full border px-2.5 py-0.5 text-[12px] tabular",
-        active ? "border-accent/60 bg-accent/12 text-accent" : "border-line-strong text-ink-2 hover:bg-surface-2",
-      )}
-    >
-      {children}
-    </button>
   );
 }
 
@@ -142,73 +98,66 @@ function BugCard({
   onZoom: (path: string) => void;
   onOpenTest: (name: string) => void;
 }) {
+  const [open, setOpen] = useState(false);
+  const extra = bug.evidence || bug.signals.length > 0 || bug.untestable_reason;
   return (
-    <article id={bug.id} className="overflow-hidden rounded-xl border border-line bg-surface">
-      <header className="flex flex-wrap items-center gap-2 border-b border-line px-4 py-3">
-        <span className="font-mono text-[12px] text-muted">{bug.id}</span>
-        <SeverityBadge severity={bug.severity} />
-        <Badge>{bug.category}</Badge>
-        <Reproduced value={bug.reproduced} pending={verifying} />
-        <h3 className="w-full text-[15px] font-medium text-ink">{bug.title}</h3>
-      </header>
-      <div className="grid gap-5 px-4 py-4 md:grid-cols-[1fr_16rem]">
-        <div className="min-w-0 space-y-4 text-[13px]">
-          <section>
-            <h4 className="mb-1.5 text-[11px] font-semibold tracking-wider text-muted uppercase">Steps to reproduce</h4>
-            <ol className="list-decimal space-y-1 pl-5 text-ink-2">
-              {bug.steps_to_reproduce.map((s, i) => (
-                <li key={i}>{s}</li>
-              ))}
-            </ol>
-          </section>
-          <section className="grid grid-cols-2 gap-3">
-            <div className="rounded-lg border border-good/25 bg-good/5 px-3 py-2">
-              <div className="mb-0.5 text-[11px] font-medium text-[#3fcf3f]">Expected</div>
-              <div className="text-ink-2">{bug.expected}</div>
-            </div>
-            <div className="rounded-lg border border-critical/30 bg-critical/6 px-3 py-2">
-              <div className="mb-0.5 text-[11px] font-medium text-[#f06a6a]">Actual</div>
-              <div className="text-ink-2">{bug.actual}</div>
-            </div>
-          </section>
-          {bug.evidence && (
-            <section>
-              <h4 className="mb-1.5 text-[11px] font-semibold tracking-wider text-muted uppercase">Evidence</h4>
-              <pre className="overflow-x-auto rounded-lg bg-surface-2 p-2.5 font-mono text-[11px] whitespace-pre-wrap text-ink-2">{bug.evidence}</pre>
-            </section>
-          )}
-          {bug.untestable_reason && (
-            <section>
-              <h4 className="mb-1.5 text-[11px] font-semibold tracking-wider text-muted uppercase">No regression test</h4>
-              <p className="text-ink-2">{bug.untestable_reason}</p>
-            </section>
-          )}
-          {bug.signals.length > 0 && (
-            <section>
-              <h4 className="mb-1.5 text-[11px] font-semibold tracking-wider text-muted uppercase">Browser signals</h4>
-              <ul className="space-y-0.5 font-mono text-[11px] text-[#f06a6a]">
-                {bug.signals.map((s, i) => (
-                  <li key={i} className="break-words">
-                    {s}
-                  </li>
-                ))}
-              </ul>
-            </section>
-          )}
-          <footer className="flex flex-wrap items-center gap-3 border-t border-line pt-3 text-[12px] text-muted">
+    <article id={bug.id} className="rounded-xl border border-line bg-surface px-4 py-3.5">
+      <div className="flex gap-4">
+        <div className="min-w-0 flex-1 space-y-2.5 text-[13px]">
+          <header className="flex flex-wrap items-center gap-2">
+            <SeverityBadge severity={bug.severity} />
+            {(bug.reproduced !== null || verifying) && <Reproduced value={bug.reproduced} pending={verifying} />}
+            <h3 className="w-full text-[15px] font-medium text-ink">{bug.title}</h3>
+          </header>
+          <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1">
+            <dt className="text-muted">Expected</dt>
+            <dd className="text-ink-2">{bug.expected}</dd>
+            <dt className="text-muted">Actual</dt>
+            <dd className="text-[#f06a6a]">{bug.actual}</dd>
+          </dl>
+          <ol className="list-decimal space-y-0.5 pl-5 text-ink-2">
+            {bug.steps_to_reproduce.map((s, i) => (
+              <li key={i}>{s}</li>
+            ))}
+          </ol>
+          <footer className="flex flex-wrap items-center gap-3 text-[12px] text-muted">
             <a href={bug.url} target="_blank" rel="noreferrer" className="flex items-center gap-1 font-mono hover:text-accent">
               {pathOf(bug.url, baseUrl)} <ExternalLink className="size-3" />
             </a>
             {bug.test && (
               <button type="button" onClick={() => onOpenTest(bug.test!)} className="flex items-center gap-1 hover:text-accent">
-                <FlaskConical className="size-3.5" />
-                <span className="font-mono">{bug.test}</span>
+                <FlaskConical className="size-3.5" /> View test
+              </button>
+            )}
+            {extra && (
+              <button type="button" onClick={() => setOpen((v) => !v)} aria-expanded={open} className="flex items-center gap-0.5 hover:text-ink">
+                Details <ChevronDown className={clsx("size-3.5 transition", open && "rotate-180")} />
               </button>
             )}
           </footer>
+          {open && (
+            <div className="space-y-2 border-t border-line pt-2.5 text-[12px]">
+              {bug.evidence && <pre className="overflow-x-auto rounded-lg bg-surface-2 p-2.5 font-mono text-[11px] whitespace-pre-wrap text-ink-2">{bug.evidence}</pre>}
+              {bug.signals.length > 0 && (
+                <ul className="space-y-0.5 font-mono text-[11px] text-[#f06a6a]">
+                  {bug.signals.map((s, i) => (
+                    <li key={i} className="break-words">
+                      {s}
+                    </li>
+                  ))}
+                </ul>
+              )}
+              {bug.untestable_reason && <p className="text-muted">No regression test: {bug.untestable_reason}</p>}
+            </div>
+          )}
         </div>
         {bug.screenshot && (
-          <button type="button" onClick={() => onZoom(bug.screenshot!)} className="self-start overflow-hidden rounded-lg border border-line hover:border-accent" title="Enlarge">
+          <button
+            type="button"
+            onClick={() => onZoom(bug.screenshot!)}
+            className="w-44 shrink-0 self-start overflow-hidden rounded-lg border border-line hover:border-accent"
+            title="Enlarge"
+          >
             <img src={artifactUrl(runId, bug.screenshot)} alt={`Screenshot for ${bug.id}`} loading="lazy" className="w-full" />
           </button>
         )}

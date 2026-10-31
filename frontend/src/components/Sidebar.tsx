@@ -1,5 +1,5 @@
 import clsx from "clsx";
-import { Bug, Globe, Plus, Trash2 } from "lucide-react";
+import { Bug, Plus, Trash2 } from "lucide-react";
 import type { Health, RunRow } from "../api/types";
 import { shortUrl, timeAgo } from "../lib/format";
 import { Badge, STATUS_DOT } from "./ui";
@@ -113,39 +113,23 @@ function RunItem({ run, active, onClick, onDelete }: { run: RunRow; active: bool
   );
 }
 
+/** Says something only when it matters: no backend, a broken browser, or demo mode. */
 function HealthFooter({ health }: { health: Health | null }) {
   if (!health) {
     return (
       <div className="border-t border-line px-4 py-2.5 text-[11px] text-critical">Backend unreachable on :8100</div>
     );
   }
-  const status = health.browser.status;
-  const browser =
-    status === "ready"
-      ? { text: "ready", cls: "text-good" }
-      : status === "idle"
-        ? { text: "starts on first run", cls: "text-muted" }
-        : status === "starting"
-          ? { text: "starting…", cls: "text-accent" }
-          : { text: "failed to start", cls: "text-critical" };
+  const broken = health.browser.status === "failed";
+  if (!broken && !health.demo_mode) return null;
   return (
-    <div className="space-y-1.5 border-t border-line px-4 py-2.5 text-[11px] text-muted">
-      <div className="flex items-center gap-1.5">
-        <span className="font-mono text-ink-2">{health.model}</span>
-        <span>· {health.effort}</span>
-        {health.demo_mode && (
-          <Badge tone="warning" className="ml-auto" title="No API key configured: a scripted agent drives the demo shop.">
-            Demo mode
-          </Badge>
-        )}
-      </div>
-      <div className="flex items-center gap-1.5">
-        <Globe className="size-3.5" />
-        <span className="truncate">Chromium {health.browser.version ?? ""}</span>
-        <span className={clsx("ml-auto shrink-0", browser.cls)} title={status}>
-          {browser.text}
-        </span>
-      </div>
+    <div className="flex items-center gap-2 border-t border-line px-4 py-2.5 text-[11px]">
+      {broken && <span className="text-critical">The browser failed to start</span>}
+      {health.demo_mode && (
+        <Badge tone="warning" className="ml-auto" title="No API key configured: a scripted agent drives the demo shop.">
+          Demo mode
+        </Badge>
+      )}
     </div>
   );
 }

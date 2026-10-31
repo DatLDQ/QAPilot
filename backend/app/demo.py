@@ -123,7 +123,7 @@ def shop_playbook(base: str) -> Playbook:
             "The user story starts with finding a product. Shoppers rarely match capitalisation, so lower-case "
             "search is the first thing to try.",
             "Scenario 1: search should ignore letter case.",
-            [("begin_scenario", {"name": "Search finds products regardless of letter case"})],
+            [("begin_scenario", {"name": "Search finds products regardless of letter case", "aspect": "edge_case"})],
         )
         obs = yield Act(
             "There is one product named Ceramic Mug, so searching 'mug' should leave exactly one card.",
@@ -156,7 +156,7 @@ def shop_playbook(base: str) -> Playbook:
         obs = yield Act(
             "Next, the cart. Quantities greater than one are where totals usually go wrong.",
             "Scenario 2: cart totals should account for quantity.",
-            [("begin_scenario", {"name": "Cart subtotal multiplies price by quantity"})],
+            [("begin_scenario", {"name": "Cart subtotal multiplies price by quantity", "aspect": "happy_path"})],
         )
         obs = yield add_and_open_cart(obs, "Ceramic Mug", "Ceramic Mug", "Canvas Tote")
         obs = yield Act(
@@ -192,7 +192,7 @@ def shop_playbook(base: str) -> Playbook:
         obs = yield Act(
             "Coupons are a classic place for stacking bugs: apply the same code twice and watch the discount.",
             "Scenario 3: SAVE10 should only apply once.",
-            [("begin_scenario", {"name": "Coupon SAVE10 applies 10% once"})],
+            [("begin_scenario", {"name": "Coupon SAVE10 applies 10% once", "aspect": "state"})],
         )
         obs = yield add_and_open_cart(obs, "Pour-Over Kettle")
         obs = yield Act(
@@ -242,7 +242,7 @@ def shop_playbook(base: str) -> Playbook:
             "Icon-only buttons often ship without an accessible name. Screen-reader users need to know which item a "
             "remove button removes.",
             "Scenario 4: cart controls should have accessible names.",
-            [("begin_scenario", {"name": "Remove button has an accessible name"})],
+            [("begin_scenario", {"name": "Remove button has an accessible name", "aspect": "accessibility"})],
         )
         obs = yield add_and_open_cart(obs, "Ceramic Mug")
         unnamed = any(e.role == "button" and not e.name for e in obs.entries)
@@ -282,7 +282,7 @@ def shop_playbook(base: str) -> Playbook:
         obs = yield Act(
             "Form validation: an address without a domain must be rejected before an order is placed.",
             "Scenario 5: checkout should reject an invalid email.",
-            [("begin_scenario", {"name": "Checkout rejects an email without a domain"})],
+            [("begin_scenario", {"name": "Checkout rejects an email without a domain", "aspect": "validation"})],
         )
         obs = yield add_and_open_cart(obs, "Dot Grid Notebook")
         obs = yield Act("", "Going to checkout.",
@@ -319,7 +319,7 @@ def shop_playbook(base: str) -> Playbook:
             "Every shipping option should be purchasable. Standard is the default path; Express is the one that "
             "tends to be forgotten.",
             "Scenario 6: an order with Express shipping should go through.",
-            [("begin_scenario", {"name": "Order with Express shipping can be placed"})],
+            [("begin_scenario", {"name": "Order with Express shipping can be placed", "aspect": "happy_path"})],
         )
         obs = yield add_and_open_cart(obs, "Desk Plant")
         obs = yield Act("", "Going to checkout.",
@@ -367,7 +367,8 @@ def shop_playbook(base: str) -> Playbook:
             "Product details are data-driven; an item with missing data is a good edge case. Wool Socks has no "
             "rating shown anywhere yet.",
             "Scenario 7: details should open for every product, including one without reviews.",
-            [("begin_scenario", {"name": "Details dialog opens for a product without reviews"})],
+            [("begin_scenario",
+              {"name": "Details dialog opens for a product without reviews", "aspect": "error_handling"})],
         )
         obs = yield Act(
             "", "Opening Wool Socks details.",
@@ -395,11 +396,30 @@ def shop_playbook(base: str) -> Playbook:
             )
             bugs.append("details")
 
-    for scenario in (search, cart_math, coupon, remove_a11y, email_validation, express_shipping, details_dialog):
+    # Each scenario opens with begin_scenario, so the n-th one gets id n.
+    areas = [
+        (search, "Find a product with search", "Lower-case search narrows the list to the matching product."),
+        (cart_math, "Add products and read the cart total", "Subtotal for several items and quantities."),
+        (coupon, "Apply a coupon", "SAVE10 takes 10% off, and only once."),
+        (remove_a11y, "Remove an item from the cart", "The Remove button works and has an accessible name."),
+        (email_validation, "Fill in the checkout form", "An email without a domain is rejected."),
+        (express_shipping, "Place an order", "An order with Express shipping goes through."),
+        (details_dialog, "Open product details", "The details dialog opens for a product without reviews."),
+    ]
+    coverage: list[dict] = []
+    for n, (scenario, area, checked) in enumerate(areas, start=1):
         try:
             yield from scenario()
+            coverage.append({"area": area, "status": "tested", "scenarios": [n], "note": checked})
         except Missing as exc:
             skipped.append(f"{scenario.__name__.replace('_', ' ')} (could not find {exc})")
+            coverage.append({"area": area, "status": "not_tested", "scenarios": [],
+                             "note": f"Could not find {exc} on the page."})
+    coverage += [
+        {"area": "Pay for the order", "status": "not_tested",
+         "note": "The shop has no payment step; real payment providers are out of scope."},
+        {"area": "Mobile layout", "status": "not_tested", "note": "The session ran on a desktop viewport only."},
+    ]
 
     if bugs:
         summary = (f"Browsing, search, cart, coupon and checkout were exercised in 7 scenarios. Found {len(bugs)} "
@@ -410,7 +430,7 @@ def shop_playbook(base: str) -> Playbook:
                    "No defects found in the covered flows.")
     untested = "; ".join(skipped) if skipped else "Payment providers, accounts and mobile layouts are out of scope."
     yield Act("Coverage is complete for the story. Wrapping up.", "Done. Writing the summary.",
-              [("finish", {"summary": summary, "untested": untested})])
+              [("finish", {"summary": summary, "untested": untested, "coverage": coverage})])
 
 
 # --- any other site: a generic smoke test ---------------------------------------------------
@@ -421,7 +441,7 @@ def smoke_playbook(base: str) -> Playbook:
         "No site-specific script for this target, so I'll run a smoke test: the home page and a few internal links "
         "should render without errors.",
         "Scenario 1: the start page should load cleanly.",
-        [("begin_scenario", {"name": "Start page loads without errors"})],
+        [("begin_scenario", {"name": "Start page loads without errors", "aspect": "happy_path"})],
     )
     host = urlparse(base).netloc
     links = [e for e in obs.links() if not e.attrs or "href=\"http" not in e.attrs or host in e.attrs][:3]
@@ -439,7 +459,8 @@ def smoke_playbook(base: str) -> Playbook:
             "actual": _fail_note(obs)})])
     for link in links:
         obs = yield Act("", f"Following the “{link.name}” link.",
-                        [("begin_scenario", {"name": f"'{link.name}' link opens without errors"})])
+                        [("begin_scenario",
+                          {"name": f"'{link.name}' link opens without errors", "aspect": "happy_path"})])
         try:
             ref = obs.find("link", link.name)
         except Missing:
@@ -454,10 +475,20 @@ def smoke_playbook(base: str) -> Playbook:
                 "title": f"Console errors after opening '{link.name}'", "severity": "medium", "category": "console",
                 "steps_to_reproduce": [f"Open {base}", f"Click '{link.name}'"], "expected": "No console errors",
                 "actual": _fail_note(obs)})])
+    coverage = [
+        {"area": "Start page loads", "status": "tested", "scenarios": [1],
+         "note": "Heading visible, no console errors."},
+        {"area": "Internal links", "status": "partly" if links else "not_tested",
+         "scenarios": list(range(2, len(links) + 2)),
+         "note": f"Opened the first {len(links)} link(s) and checked for console errors." if links
+         else "No internal links found on the start page."},
+        {"area": "Forms, sign-in and the rest of the user story", "status": "not_tested",
+         "note": "Offline demo mode only smoke-tests unknown sites."},
+    ]
     summary = (f"Smoke-tested the start page and {len(links)} internal link(s). "
                + (f"Found {found} issue(s)." if found else "No errors were observed."))
     yield Act("", "Done.", [("finish", {
-        "summary": summary,
+        "summary": summary, "coverage": coverage,
         "untested": "Offline demo mode runs a generic smoke test on unknown sites. Set ANTHROPIC_API_KEY "
                     "(or GEMINI_API_KEY) for a full exploratory session."})])
 

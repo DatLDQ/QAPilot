@@ -79,11 +79,25 @@ async def test_failed_call_skips_the_rest_of_the_turn(settings):
 async def test_step_limit_forces_a_final_answer(settings):
     settings.max_agent_steps = 2
     llm = FakeLLM([([tool_use(f"t{i}", "snapshot")], "tool_use") for i in range(5)])
-    agent = QAAgent(llm, FakeExecutor(), settings)  # type: ignore[arg-type]
-    await collect(agent)
-    assert [c["tool_choice"] for c in llm.calls] == [None, None, {"type": "none"}]
+    executor = FakeExecutor()
+    agent = QAAgent(llm, executor, settings)  # type: ignore[arg-type]
+    events = await collect(agent)
+    assert len(llm.calls) == 3 and len(executor.calls) == 2  # the wrap-up turn may only finish
     notice = llm.calls[2]["messages"][-1]["content"][-1]
-    assert notice["type"] == "text" and "step" in notice["text"].lower()
+    assert notice["type"] == "text" and "finish" in notice["text"]
+    assert [e["is_error"] for e in events if e["type"] == "tool_result"] == [False, False, True]
+
+
+async def test_step_limit_lets_the_agent_finish_with_coverage(settings):
+    settings.max_agent_steps = 1
+    llm = FakeLLM([
+        ([tool_use("t1", "snapshot")], "tool_use"),
+        ([tool_use("t2", "snapshot"), tool_use("t3", "finish", summary="Out of steps.")], "tool_use"),
+    ])
+    executor = FakeExecutor()
+    agent = QAAgent(llm, executor, settings)  # type: ignore[arg-type]
+    await collect(agent)
+    assert [c[0] for c in executor.calls] == ["snapshot", "finish"] and agent.finished
 
 
 async def test_truncated_turn_never_runs_tools(settings):

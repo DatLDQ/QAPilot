@@ -37,6 +37,7 @@ def test_every_tool_streams_eagerly_and_has_a_valid_schema():
         ("report_bug", {**BUG, "severity": "blocker"}, "'severity' must be one of"),
         ("report_bug", {**BUG, "steps_to_reproduce": []}, "'steps_to_reproduce' needs at least 1 item(s)."),
         ("report_bug", {**BUG, "steps_to_reproduce": ["ok", ""]}, "'steps_to_reproduce' must be a list of"),
+        ("finish", {"summary": "x", "coverage": ["all of it"]}, "'coverage' must be a list of objects."),
     ],
 )
 def test_validate_input_rejects(name, data, error):
@@ -124,5 +125,21 @@ async def test_report_bug_drops_the_reason_when_a_check_backs_it(executor):
 async def test_finish_ends_the_session(executor):
     outcome = await executor.execute("finish", {"summary": "Checkout is broken.", "untested": "Payments"})
     assert outcome.finished and outcome.ui == {"kind": "finish", "summary": "Checkout is broken.",
-                                               "untested": "Payments"}
+                                               "untested": "Payments", "coverage": []}
     assert executor.recorder.summary == "Checkout is broken."
+
+
+async def test_finish_keeps_well_formed_coverage_rows(executor):
+    executor.recorder.begin("Coupon", None, 0)
+    coverage = [
+        {"area": "Apply a coupon", "status": "tested", "scenarios": [1, 1, 7, "2"], "note": "SAVE10 once"},
+        {"area": "Pay", "status": "not_tested", "note": "  "},
+        {"area": "", "status": "tested"},
+        {"area": "Sign in", "status": "maybe"},
+    ]
+    outcome = await executor.execute("finish", {"summary": "ok", "coverage": coverage})
+    assert outcome.ui["coverage"] == executor.recorder.coverage == [
+        {"area": "Apply a coupon", "status": "tested", "scenarios": [1], "note": "SAVE10 once"},
+        {"area": "Pay", "status": "not_tested", "scenarios": [], "note": None},
+    ]
+    assert executor.recorder.to_dict()["coverage"] == executor.recorder.coverage

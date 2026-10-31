@@ -12,7 +12,7 @@ from typing import Any
 
 from .browser import ActionResult, BrowserBridge, BrowserError, BrowserSession, CheckResult, Signal
 from .locators import described, render_ts
-from .recorder import CATEGORIES, SEVERITIES, Recorder
+from .recorder import ASPECTS, CATEGORIES, COVERAGE_STATUSES, SEVERITIES, Recorder
 
 ASSERTIONS = (
     "visible", "hidden", "text_equals", "text_contains", "value_equals", "checked", "unchecked",
@@ -46,6 +46,11 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
         "after the behaviour it verifies, e.g. 'Coupon can only be applied once'. Each scenario becomes one test.",
         {
             "name": {"type": "string", "description": "Behaviour under test, phrased as the expected outcome."},
+            "aspect": {
+                "type": "string",
+                "enum": list(ASPECTS),
+                "description": "Which kind of behaviour this scenario covers.",
+            },
             "start_url": {"type": "string", "description": "Optional absolute URL on the target host."},
         },
         ["name"],
@@ -155,7 +160,25 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
         "End the session once the story is covered (or the budget is nearly spent).",
         {
             "summary": {"type": "string", "description": "2-5 sentences: what works, what is broken, overall risk."},
-            "untested": {"type": "string", "description": "Anything you could not cover and why."},
+            "coverage": {
+                "type": "array",
+                "description": "One row per part of the user story and focus, so the reader sees what this "
+                "session did and did not test.",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "area": {"type": "string", "description": "A part of the story, e.g. 'Apply a coupon'."},
+                        "status": {"type": "string", "enum": list(COVERAGE_STATUSES)},
+                        "scenarios": {
+                            "type": "array", "items": {"type": "integer"},
+                            "description": "Ids of the scenarios that exercised it.",
+                        },
+                        "note": {"type": "string", "description": "What was checked, or why it was not tested."},
+                    },
+                    "required": ["area", "status"],
+                },
+            },
+            "untested": {"type": "string", "description": "Anything else you noticed but left alone, and why."},
         },
         ["summary"],
     ),
@@ -189,7 +212,10 @@ def validate_input(name: str, data: Any) -> tuple[dict[str, Any] | None, str | N
             return None, f"'{key}' must be of type {spec['type']}."
         if "enum" in spec and value not in spec["enum"]:
             return None, f"'{key}' must be one of: {', '.join(spec['enum'])}."
-        if spec["type"] == "array":
+        if spec["type"] == "array" and spec.get("items", {}).get("type") == "object":
+            if not all(isinstance(v, dict) for v in value):
+                return None, f"'{key}' must be a list of objects."
+        elif spec["type"] == "array":
             if not all(isinstance(v, str) and v.strip() for v in value):
                 return None, f"'{key}' must be a list of non-empty strings."
             if len(value) < spec.get("minItems", 0):
@@ -289,15 +315,16 @@ class QAToolExecutor:
 
     # --- tools ------------------------------------------------------------------------
 
-    async def _begin_scenario(self, name: str, start_url: str | None = None) -> ToolOutcome:
+    async def _begin_scenario(self, name: str, start_url: str | None = None, aspect: str | None = None) -> ToolOutcome:
         url = start_url or self.recorder.target_url
         signal_start = self.session.last_signal_seq
-        result = await self.bridge.call(self.session.reset(url))
-        scenario = self.recorder.begin(name, url, signal_start)
+        result = await self.bridge.call(self.session.reset(url, label=f"Scenario: {name}"))
+        scenario = self.recorder.begin(name, url, signal_start, aspect if aspect in ASPECTS else None)
         outcome = self._action_outcome(f"Scenario {scenario.id} started: {scenario.name} (fresh storage)", result,
                                        None, "")
-        outcome.ui.update({"kind": "scenario", "scenario": {"id": scenario.id, "name": scenario.name, "start_url": url},
-                           "scenario_id": scenario.id})
+        outcome.ui.update({"kind": "scenario", "scenario_id": scenario.id,
+                           "scenario": {"id": scenario.id, "name": scenario.name, "start_url": url,
+                                        "aspect": scenario.aspect}})
         return outcome
 
     async def _navigate(self, url: str) -> ToolOutcome:
@@ -305,32 +332,33 @@ class QAToolExecutor:
         return self._action_outcome(f"Opened {result.snapshot.url}", result, "goto", f"Open {url}", url)
 
     async def _click(self, ref: str, description: str) -> ToolOutcome:
-        result = await self.bridge.call(self.session.act("click", ref))
+        result = await self.bridge.call(self.session.act("click", ref, label=description))
         return self._action_outcome(f"click: {description}", result, "click", description)
 
     async def _fill(self, ref: str, value: str, description: str) -> ToolOutcome:
-        result = await self.bridge.call(self.session.act("fill", ref, value))
+        label = f"Type {value!r}: {description}"
+        result = await self.bridge.call(self.session.act("fill", ref, value, label=label))
         return self._action_outcome(f"fill {value!r}: {description}", result, "fill", description, value)
 
     async def _select_option(self, ref: str, option: str, description: str) -> ToolOutcome:
-        result = await self.bridge.call(self.session.act("select", ref, option))
+        result = await self.bridge.call(self.session.act("select", ref, option, label=description))
         return self._action_outcome(f"selected {result.value!r}: {description}", result, "select", description,
                                     result.value)
 
     async def _set_checked(self, ref: str, checked: bool, description: str) -> ToolOutcome:
-        result = await self.bridge.call(self.session.act("check", ref, checked))
+        result = await self.bridge.call(self.session.act("check", ref, checked, label=description))
         verb = "checked" if checked else "unchecked"
         return self._action_outcome(f"{verb}: {description}", result, "check", description, checked)
 
     async def _press_key(self, key: str, description: str, ref: str | None = None) -> ToolOutcome:
         if ref:
-            result = await self.bridge.call(self.session.act("press", ref, key))
+            result = await self.bridge.call(self.session.act("press", ref, key, label=f"Press {key}: {description}"))
         else:
-            result = await self.bridge.call(self.session.press_page(key))
+            result = await self.bridge.call(self.session.press_page(key, label=f"Press {key}: {description}"))
         return self._action_outcome(f"pressed {key}: {description}", result, "press", description, key)
 
     async def _hover(self, ref: str, description: str) -> ToolOutcome:
-        result = await self.bridge.call(self.session.act("hover", ref))
+        result = await self.bridge.call(self.session.act("hover", ref, label=description))
         return self._action_outcome(f"hover: {description}", result, "hover", description)
 
     async def _snapshot(self, wait_seconds: float = 0.0) -> ToolOutcome:
@@ -376,7 +404,8 @@ class QAToolExecutor:
                                is_error=True, summary="count needs a description")
         self.recorder.ensure_scenario(self.session.last_signal_seq)
         result: CheckResult = await self.bridge.call(
-            self.session.check(assertion, ref=ref, target=target, expected=expected, since_seq=self._signal_start)
+            self.session.check(assertion, ref=ref, target=target, expected=expected, since_seq=self._signal_start,
+                               label=description)
         )
         step = self.recorder.add_step(
             self.session.last_signal_seq, kind="expect", description=description, locator=result.spec,
@@ -464,8 +493,26 @@ class QAToolExecutor:
             ui={"kind": "bug", "bug": bug.to_dict(), "screenshot": rel},
         )
 
-    async def _finish(self, summary: str, untested: str | None = None) -> ToolOutcome:
+    async def _finish(
+        self, summary: str, untested: str | None = None, coverage: list[dict[str, Any]] | None = None
+    ) -> ToolOutcome:
         self.recorder.summary = summary
         self.recorder.untested = untested
+        self.recorder.coverage = clean_coverage(coverage or [], {s.id for s in self.recorder.scenarios})
         return ToolOutcome(content="Session finished.", summary="Session finished", finished=True,
-                           ui={"kind": "finish", "summary": summary, "untested": untested})
+                           ui={"kind": "finish", "summary": summary, "untested": untested,
+                               "coverage": self.recorder.coverage})
+
+
+def clean_coverage(rows: list[dict[str, Any]], scenario_ids: set[int]) -> list[dict[str, Any]]:
+    """Keep the well-formed coverage rows, and only scenario ids that exist."""
+    out = []
+    for row in rows:
+        area = str(row.get("area") or "").strip()
+        status = row.get("status")
+        if not area or status not in COVERAGE_STATUSES:
+            continue
+        ids = [i for i in row.get("scenarios") or [] if type(i) is int and i in scenario_ids]
+        note = str(row.get("note") or "").strip() or None
+        out.append({"area": area, "status": status, "scenarios": sorted(set(ids)), "note": note})
+    return out

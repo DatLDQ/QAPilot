@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatCost, formatMs, parseTime, pathOf, plural, shortUrl, timeAgo } from "./format";
+import { formatMs, parseTime, pathOf, plural, shortUrl, timeAgo } from "./format";
 
 describe("formatMs", () => {
   it("scales from milliseconds to minutes", () => {
@@ -7,15 +7,6 @@ describe("formatMs", () => {
     expect(formatMs(4200)).toBe("4.2 s");
     expect(formatMs(125_000)).toBe("2m 05s");
     expect(formatMs(119_700)).toBe("2m 00s");
-  });
-});
-
-describe("formatCost", () => {
-  it("handles missing, zero, tiny and normal costs", () => {
-    expect(formatCost(null)).toBe("n/a");
-    expect(formatCost(0)).toBe("$0");
-    expect(formatCost(0.00412)).toBe("$0.0041");
-    expect(formatCost(1.23456)).toBe("$1.235");
   });
 });
 

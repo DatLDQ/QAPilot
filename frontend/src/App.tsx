@@ -109,6 +109,7 @@ export default function App() {
     const loadDetail = () =>
       api.getRun(id).then((detail) => {
         if (!controller.signal.aborted) patch((r) => ({ ...r, detail }));
+        return detail.live;
       });
 
     const notFound = (e: unknown) => {
@@ -119,7 +120,12 @@ export default function App() {
       } else fail(e);
     };
 
-    loadDetail().catch(notFound);
+    // A finished run opens on its bugs; a live one on the session as it happens.
+    loadDetail()
+      .then((live) => {
+        if (!live && !controller.signal.aborted) setTab("bugs");
+      })
+      .catch(notFound);
     followRun(id, (ev) => patch((r) => ({ ...r, view: reduceRun(r.view, ev) })), controller.signal)
       .then(() => {
         if (controller.signal.aborted) return;
@@ -207,15 +213,16 @@ export default function App() {
     return () => clearTimeout(t);
   }, [toast]);
 
-  const tabs = useMemo(
-    () => [
-      { id: "live" as const, label: live ? "Live" : "Session", icon: <MonitorPlay className="size-3.5" /> },
-      { id: "bugs" as const, label: "Bugs", count: bugs.length, icon: <BugIcon className="size-3.5" /> },
+  const tabs = useMemo(() => {
+    const session = { id: "live" as const, label: live ? "Live" : "Session", icon: <MonitorPlay className="size-3.5" /> };
+    const bugTab = { id: "bugs" as const, label: "Bugs", count: bugs.length, icon: <BugIcon className="size-3.5" /> };
+    return [
+      // While the run is live the session is the news; afterwards the bugs are.
+      ...(live ? [session, bugTab] : [bugTab, session]),
       { id: "tests" as const, label: "Tests", count: view.suite?.tests.length, icon: <FlaskConical className="size-3.5" /> },
       { id: "report" as const, label: "Report", icon: <FileText className="size-3.5" /> },
-    ],
-    [live, bugs.length, view.suite],
-  );
+    ];
+  }, [live, bugs.length, view.suite]);
 
   // ---- render -------------------------------------------------------------
   return (

@@ -8,6 +8,7 @@ from .recorder import Bug, Recorder
 from .verify import VERDICT_LABELS, SuiteRun
 
 SEVERITY_ORDER = {"critical": 0, "high": 1, "medium": 2, "low": 3}
+COVERAGE_LABELS = {"tested": "Tested", "partly": "Partly tested", "not_tested": "Not tested"}
 
 
 def _reproduced_label(bug: Bug) -> str:
@@ -73,13 +74,10 @@ def render_markdown(
     control: SuiteRun | None,
 ) -> str:
     stats = recorder.stats()
-    usage = meta.get("usage") or {}
-    cost = usage.get("cost_usd")
     lines = [
         f"# QA report: {recorder.target_url}",
         "",
-        f"Run `{meta['id']}` · {meta.get('created_at', '')} · model `{meta.get('model', '')}` · "
-        f"{meta.get('steps', 0)} agent steps" + (f" · ${cost:.2f}" if cost else ""),
+        f"Run `{meta['id']}` · {meta.get('created_at', '')} · {meta.get('steps', 0)} agent steps",
         "",
         "## User story",
         "",
@@ -109,6 +107,14 @@ def render_markdown(
     lines += ["", "## Scenarios", "", "| # | Scenario | Steps | Checks | Failed |", "| --- | --- | --- | --- | --- |"]
     for s in recorder.scenarios:
         lines.append(f"| {s.id} | {s.name} | {len(s.steps)} | {len(s.checks)} | {len(s.failed_checks)} |")
+    if recorder.coverage:
+        lines += ["", "## Coverage", "", "| Part of the story | Status | Scenarios | Notes |",
+                  "| --- | --- | --- | --- |"]
+        for row in recorder.coverage:
+            ids = ", ".join(f"#{i}" for i in row["scenarios"]) or "-"
+            status = COVERAGE_LABELS.get(row["status"], row["status"])
+            area, note = (str(v or "").replace("|", r"\|") for v in (row["area"], row["note"]))
+            lines.append(f"| {area} | {status} | {ids} | {note} |")
     if recorder.untested:
         lines += ["", "## Not tested", "", recorder.untested]
     lines += [

@@ -21,7 +21,8 @@ work the way you would want that test to read.
    the happy path first, then edge cases, validation, state transitions, error handling and
    basic accessibility (unlabelled controls, missing alt text).
 2. Start every scenario with `begin_scenario`. It resets cookies and storage and reopens the
-   start page, so each generated test stands alone. Name it after the behaviour it verifies.
+   start page, so each generated test stands alone. Name it after the behaviour it verifies
+   and set `aspect` to the kind of behaviour it covers.
 3. Inside a scenario, take the steps a user would take and use `expect` to assert what SHOULD
    happen, according to the story and common sense (prices add up, totals use quantities,
    validation rejects bad input, a coupon applies once, no uncaught errors). Assert the correct
@@ -40,7 +41,11 @@ work the way you would want that test to read.
    only when no assertion can express the defect, such as a wrong image.
 5. End scenarios that exercise flows with `expect no_console_errors` when errors would matter.
 6. Keep an eye on the budget: about {max_steps} tool-using steps in total. Do not repeat
-   scenarios that already passed. Call `finish` with a short summary when the story is covered.
+   scenarios that already passed. Call `finish` when the story is covered, with a short summary
+   and `coverage`: one row per part of the user story and focus (e.g. "Change quantities",
+   "Apply the coupon", "Check out"), marked tested, partly or not_tested, with the ids of the
+   scenarios that exercised it and a short note: what was checked, or why it was not (out of
+   budget, blocked by a bug, needs real payment details).
 
 ## Severity
 - critical: data loss, payments or orders broken, security problems, blocking crashes.
@@ -99,7 +104,8 @@ def step_limit_notice(story: str, focus: str | None = None) -> str:
     # Name the language outright: this late in a long session, "the story's language" gets lost.
     language = story_language(story, focus) or "the same language as the user story"
     return (
-        "You have reached the step budget for this session. Do not call any more tools. "
-        f"Reply with a 2-5 sentence summary, written in {language}: what works, what is broken, "
-        "and what you did not get to."
+        "You have reached the step budget for this session. Call `finish` now and no other tool. "
+        f"Its summary is 2-5 sentences written in {language}: what works, what is broken, and what you did "
+        "not get to. Fill `coverage` with every part of the user story and focus, marking the parts you did "
+        "not reach as not_tested."
     )
